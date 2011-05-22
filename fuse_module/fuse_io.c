@@ -143,11 +143,7 @@ fuse_io_file(struct file *fp, struct uio *uio, struct ucred *cred, int flags,
 	struct vnode *vp, *ovl_vp = fp->f_vnode;
 	int err = 0;
 
-	vn_lock(ovl_vp, LK_EXCLUSIVE | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-	        , td
-#endif
-	        );
+	vn_lock(ovl_vp, LK_EXCLUSIVE | LK_RETRY);
 
 	if (_file_is_bad(fp) || ! _file_is_fat(fp)) {
 		err = EBADF;
@@ -161,11 +157,7 @@ fuse_io_file(struct file *fp, struct uio *uio, struct ucred *cred, int flags,
 		goto out;
 
 	if (uio->uio_rw == UIO_WRITE && fp->f_flag & O_APPEND) {
-		if ((err = VOP_GETATTR(vp, &va, cred
-#if VOP_GETATTR_TAKES_THREAD
-		    , td
-#endif
-		    )))
+		if ((err = VOP_GETATTR(vp, &va, cred)))
 			goto out;
 		uio->uio_offset = va.va_size;
 	} else if ((flags & FOF_OFFSET) == 0)
@@ -179,11 +171,7 @@ fuse_io_file(struct file *fp, struct uio *uio, struct ucred *cred, int flags,
 	fp->f_nextoff = uio->uio_offset;
 
 out:
-	VOP_UNLOCK(ovl_vp, 0
-#if VOP_UNLOCK_TAKES_THREAD
-	           , td
-#endif
-	           );
+	VOP_UNLOCK(ovl_vp, 0);
 	DEBUG("leaving with %d\n", err);
 	return (err);
 }
@@ -831,11 +819,7 @@ fuse_strategy_i(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
 #if FUSELIB_CONFORM_BIOREAD
 		struct vattr va;
 
-		if ((err = VOP_GETATTR(vp, &va, cred
-#if VOP_GETATTR_TAKES_THREAD
-		    , curthread
-#endif
-		    )))
+		if ((err = VOP_GETATTR(vp, &va, cred)))
 			goto out;
 #endif
 

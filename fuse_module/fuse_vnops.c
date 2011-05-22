@@ -42,9 +42,7 @@
 #include "fuse_vnode.h"
 #include "fuse_io.h"
 
-#if USE_PRIVILEGE_API
 #include <sys/priv.h>
-#endif
 
 /* function prototype for iterators over filehandles (of a vp) */
 typedef int fuse_metrics_t(struct fuse_filehandle *fufh, struct thread *td,
@@ -799,11 +797,7 @@ fuse_getattr(ap)
 	struct vnode *vp = ap->a_vp;
 	struct vattr *vap = ap->a_vap;
 	struct ucred *cred = ap->a_cred;
-#if VOP_GETATTR_TAKES_THREAD
-	struct thread *td = ap->a_td;
-#else
 	struct thread *td = curthread;
-#endif
 	struct fuse_dispatcher fdi;
 	struct timespec uptsp;
 	int err = 0;
@@ -893,12 +887,7 @@ fuse_access(ap)
 	else
 		facp.facc_flags |= FACCESS_DO_ACCESS;
 
-	return fuse_access_i(vp,
-#if VOP_ACCESS_TAKES_ACCMODE_T
-	    ap->a_accmode,
-#else
-	    ap->a_mode,
-#endif
+	return fuse_access_i(vp, ap->a_accmode,
 	    ap->a_cred, ap->a_td, &facp);
 }
 
@@ -959,11 +948,7 @@ fuse_access_i(struct vnode *vp, mode_t mode, struct ucred *cred, struct thread *
 		/* We are to do the check in-kernel */
 
 		if (! (facp->facc_flags & FACCESS_VA_VALID)) {
-			err = VOP_GETATTR(vp, VTOVA(vp), cred
-#if VOP_GETATTR_TAKES_THREAD
-			    , td
-#endif
-			    );
+			err = VOP_GETATTR(vp, VTOVA(vp), cred);
 			if (err)
 				return (err);
 			facp->facc_flags |= FACCESS_VA_VALID;
@@ -1345,20 +1330,12 @@ fuse_lookup(ap)
 				 * If doing dotdot, we unlock dvp for vget time
 				 * to conform lock order regulations.
 				 */
-				VOP_UNLOCK(dvp, 0
-#if VOP_UNLOCK_TAKES_THREAD
-				           , td
-#endif
-				           );
+				VOP_UNLOCK(dvp, 0);
 			err = fuse_vget_i(dvp->v_mount, td, nid,
 			                  IFTOVT(fattr->mode), &vp, VG_NORMAL,
 			                  parentid);
 			if (flags & ISDOTDOT)
-				vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-				        , td
-#endif
-				        );
+				vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 			if (err)
 				goto out;
 			*vpp = vp;
@@ -1625,11 +1602,7 @@ bringup:
 	cache_attrs(vp, feo);
 
 try_insert:
-	VOP_UNLOCK(vp, 0
-#if VOP_UNLOCK_TAKES_THREAD
-	           , td
-#endif
-	           );
+	VOP_UNLOCK(vp, 0);
 	/*
 	 * We can't let the vnode being vput() here, the caller wants
 	 * that do by herself.
@@ -1642,13 +1615,8 @@ try_insert:
 	if (! err && clashvp)
 		fuse_vnode_teardown(clashvp, td, cred, VREG);
 
-#if NEW_VNODES_ADJUSTED_MANUALLY
 	if (! err) {
-		err = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-		              , td
-#endif
-		              );
+		err = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 		if (err)
 			printf("fuse4bsd: leaking vnode %p\n", vp);
 		else {
@@ -1658,7 +1626,6 @@ try_insert:
 			err = insmntque(vp, mp);
 		}
 	}
-#endif
 
 	if (! err)
 		err = vfs_hash_insert(vp, feo->nodeid, LK_EXCLUSIVE, td,
@@ -1887,11 +1854,7 @@ fuse_open(ap)
 
 	struct fuse_filehandle *fufh = NULL;
 	int err = 0;
-#if VOP_OPEN_TAKES_FP
 	struct file *fp = ap->a_fp;
-#else
-	struct file *fp = NULL;
-#endif
 	struct get_filehandle_param gefhp;
 
 	/*
@@ -1899,19 +1862,6 @@ fuse_open(ap)
 	 * internal (fileless) open: to match the "specs", we must get the
 	 * keep_cache information (and act according to it).
 	 */
-
-#if ! VOP_OPEN_TAKES_FP
-	if (ap->a_fdidx >= 0) {
-		/*
-		 * That certain "pretty disgustingly long chain"
-		 * by which we can put our hands of the file struct
-		 * assinged to this call.
-		 */
-		fp = td->td_proc->p_fd->fd_ofiles[ap->a_fdidx];
-		if (! fp)
-			panic("nonneg file desc passed to us but no file there");
-	}
-#endif
 
 #if _DEBUG2G
 	if (fp)
@@ -1946,11 +1896,7 @@ fuse_open(ap)
 		 * It will not invalidate pages which are dirty, locked, under
 		 * writeback or mapped into pagetables.") 
 		 */
-#if VOP_GETATTR_TAKES_THREAD
-		err = vinvalbuf(vp, 0, td, PCATCH, 0);
-#else
 		err = vinvalbuf(vp, 0, PCATCH, 0);
-#endif
 		fufh->flags |= FOPEN_KEEP_CACHE;
 	}
 
@@ -2039,11 +1985,7 @@ fuse_close_f(struct file *fp, struct thread *td)
 	if (! _file_is_fat(fp))
 		panic("non-fat file passed to close routine");
 
-	vn_lock(ovl_vp, LK_EXCLUSIVE | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-	        , td
-#endif
-	        );
+	vn_lock(ovl_vp, LK_EXCLUSIVE | LK_RETRY);
 
 	if (_file_is_bad(fp)) {
 		DEBUG2G("fp %p, (overlay) vnode %p: went bad, giving up\n",
@@ -2483,14 +2425,8 @@ fuse_create(ap)
 	if ((err = getnewvnode("fuse", dvp->v_mount, &fuse_vnops, vpp)))
 		return (err);
 
-	if ((err = vn_lock(*vpp, LK_EXCLUSIVE | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-	                   , curthread
-#endif
-	                   ))) {
-#if NEW_VNODES_ADJUSTED_MANUALLY
+	if ((err = vn_lock(*vpp, LK_EXCLUSIVE | LK_RETRY))) {
 		printf("fuse4bsd: leaking vnode %p\n", *vpp);
-#endif
 		return (err);
 	}
 
@@ -2511,9 +2447,7 @@ fuse_create(ap)
 	 */
 	(*vpp)->v_op = &fuse_germ_vnops;
 	(*vpp)->v_data = fvdat;
-#if NEW_VNODES_ADJUSTED_MANUALLY
 	(*vpp)->v_mount = dvp->v_mount;
-#endif
 
 	fuse_invalidate_attr(dvp);
 
@@ -2835,11 +2769,7 @@ fuse_rename(ap)
 	 * No LK_RETRY. See discussion in thread
 	 * http://thread.gmane.org/gmane.os.dragonfly-bsd.kernel/8952/focus=8964
 	 */
-	err = vn_lock(fvp, LK_EXCLUSIVE
-#if VN_LOCK_TAKES_THREAD
-	              , td
-#endif
-	              );
+	err = vn_lock(fvp, LK_EXCLUSIVE);
 	if (err)
 		goto out;
 
@@ -2850,11 +2780,7 @@ fuse_rename(ap)
 		if ((fcnp->cn_namelen == 1 && fcnp->cn_nameptr[0] == '.')
 			|| fdvp == fvp
 			|| ((fcnp->cn_flags | tcnp->cn_flags) & ISDOTDOT)) {
-			VOP_UNLOCK(fvp, 0
-#if VOP_UNLOCK_TAKES_THREAD
-			           , td
-#endif
-			           );
+			VOP_UNLOCK(fvp, 0);
 			err = EINVAL;
 			goto out;
 		}
@@ -2873,9 +2799,6 @@ fuse_rename(ap)
 	err = fuse_access_i(fvp, VWRITE, tcnp->cn_cred, tcnp->cn_thread, &facp);
 	fnid = VTOI(fvp);
 	VOP_UNLOCK(fvp, 0
-#if VOP_UNLOCK_TAKES_THREAD
-	           , td
-#endif
 	           );
 	if (err)
 		goto out;
@@ -3026,11 +2949,7 @@ fuse_setattr(ap)
 	struct vattr *vap = ap->a_vap;
 	struct vnode *vp = ap->a_vp;
 	struct ucred *cred = ap->a_cred;
-#if VOP_GETATTR_TAKES_THREAD
-	struct thread *td = ap->a_td;
-#else
 	struct thread *td = curthread;
-#endif
 	int err = 0;
 	struct fuse_dispatcher fdi;
 	struct fuse_setattr_in *fsai;

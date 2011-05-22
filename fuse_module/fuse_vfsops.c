@@ -24,12 +24,8 @@
 #include "fuse_session.h"
 #include "fuse_vnode.h"
 
-#if USE_PRIVILEGE_API
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
-#else
-#include <sys/mac.h>
-#endif
 
 
 /* This will do for privilege types for now */
@@ -214,14 +210,9 @@ fuse_send_init(struct fuse_data *data, struct thread *td)
  * Mount system call
  */
 static int
-#if VFSOPS_TAKES_THREAD
-fuse_mount(struct mount *mp, struct thread *td)
-{
-#else
 fuse_mount(struct mount *mp)
 {
 	struct thread *td = curthread;
-#endif
 	int err = 0;
 	size_t len;
 	char *fspec, *subtype = NULL;
@@ -427,15 +418,9 @@ fuse_mount(struct mount *mp)
 
 	err = getnewvnode("fuse", mp, &fuse_vnops, &rvp);
 	if (! err) {
-		err = vn_lock(rvp, LK_EXCLUSIVE | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-		              , td
-#endif
-		              );
-#if NEW_VNODES_ADJUSTED_MANUALLY
+		err = vn_lock(rvp, LK_EXCLUSIVE | LK_RETRY);
 		if (err)
 			printf("fuse4bsd: leaking vnode %p\n", rvp);
-#endif
 	}
 
 	if (! err) {
@@ -448,9 +433,7 @@ fuse_mount(struct mount *mp)
 		data->rvp = rvp;
 		fuse_vnode_init(rvp, fvdat, FUSE_ROOT_ID, VNON, 0);
 		rvp->v_vflag |= VV_ROOT;
-#if NEW_VNODES_ADJUSTED_MANUALLY
 		err = insmntque(rvp, mp);
-#endif
 	}
 
 	if (err) {
@@ -459,11 +442,7 @@ fuse_mount(struct mount *mp)
 		free(fvdat, M_FUSEVN);
 	        goto out;
 	} else
-		VOP_UNLOCK(rvp, 0
-#if VOP_UNLOCK_TAKES_THREAD
-		           , td
-#endif
-		           );
+		VOP_UNLOCK(rvp, 0);
 	data->mp = mp;
 	data->mpri = FM_PRIMARY;
 	data->dataflag |= mntopts;
@@ -536,14 +515,9 @@ out:
  * Unmount system call
  */
 static int
-#if VFSOPS_TAKES_THREAD
-fuse_unmount(struct mount *mp, int mntflags, struct thread *td)
-{
-#else
 fuse_unmount(struct mount *mp, int mntflags)
 {
 	struct thread *td = curthread;
-#endif
 	int flags = 0, err = 0;
 	struct fuse_data *data;
 	struct fuse_secondary_data *fsdat = NULL;
@@ -646,17 +620,12 @@ unlock:
 
 /* stolen from portalfs */
 static int
-#if VFSOPS_TAKES_THREAD
-fuse_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
-{
-#else
 fuse_root(struct mount *mp, int flags, struct vnode **vpp)
 {
-	struct thread *td = curthread;
-#endif
 	/*
 	 * Return locked reference to root.
 	 */
+	struct thread *td = curthread;
 	struct fuse_data *data = fusefs_get_data(mp);
 	struct vnode *vp;
 
@@ -669,11 +638,7 @@ fuse_root(struct mount *mp, int flags, struct vnode **vpp)
 		data = fsdat->master;
 		sx_slock(&data->mhierlock);
 		if (data->mpri == FM_PRIMARY)
-			err = fuse_root(data->mp, flags, vpp
-#if VFSOPS_TAKES_THREAD
-			    , td
-#endif
-			    );
+			err = fuse_root(data->mp, flags, vpp);
 		else
 			err = ENXIO;
 		sx_sunlock(&data->mhierlock);
@@ -682,19 +647,11 @@ fuse_root(struct mount *mp, int flags, struct vnode **vpp)
 
 	vp = data->rvp;
 	vref(vp);
-	vn_lock(vp, flags | LK_RETRY
-#if VN_LOCK_TAKES_THREAD
-	        , td
-#endif
-	        );
+	vn_lock(vp, flags | LK_RETRY);
 	if (vp->v_type == VNON) {
 		struct vattr va;
 
-		(void)VOP_GETATTR(vp, &va, td->td_ucred
-#if VOP_GETATTR_TAKES_THREAD
-		    , td
-#endif
-		);
+		(void)VOP_GETATTR(vp, &va, td->td_ucred);
 	}
 	*vpp = vp;
 #if _DEBUG2G
@@ -705,14 +662,9 @@ fuse_root(struct mount *mp, int flags, struct vnode **vpp)
 }
 
 static int
-#if VFSOPS_TAKES_THREAD
-fuse_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
-{
-#else
 fuse_statfs(struct mount *mp, struct statfs *sbp)
 {
 	struct thread *td = curthread;
-#endif
 	struct fuse_dispatcher fdi;
 	struct fuse_statfs_out *fsfo;
 	struct fuse_data *data;
@@ -729,11 +681,7 @@ fuse_statfs(struct mount *mp, struct statfs *sbp)
 
 		sx_slock(&data->mhierlock);
 		if (data->mpri == FM_PRIMARY)
-			err = fuse_statfs(data->mp, sbp
-#if VFSOPS_TAKES_THREAD
-			    , td
-#endif
-			    );
+			err = fuse_statfs(data->mp, sbp);
 		else
 			err = ENXIO;
 		sx_sunlock(&data->mhierlock);
@@ -831,11 +779,7 @@ fuse_vget_i(struct mount *mp, struct thread *td, uint64_t nodeid,
 	if (nodeid == FUSE_ROOT_ID) {
 		if (parentid != FUSE_NULL_ID)
 			return (ENOENT);
-		err = VFS_ROOT(mp, myflags, vpp
-#if VFSOPS_TAKES_THREAD
-		    , td
-#endif
-		    );
+		err = VFS_ROOT(mp, myflags, vpp);
 		if (err)
 			return (err);
 		KASSERT(*vpp, ("we neither err'd nor found the root node"));
@@ -929,12 +873,7 @@ audit:
 	        return (err);
 	}
 
-#if NEW_VNODES_ADJUSTED_MANUALLY
-	err = vn_lock(*vpp, myflags
-#if VN_LOCK_TAKES_THREAD
-	              , td
-#endif
-	              );
+	err = vn_lock(*vpp, myflags);
 	if (err)
 		printf("fuse4bsd: leaking vnode %p\n", *vpp);
 	else
@@ -943,7 +882,6 @@ audit:
 	        free(fvdat, M_FUSEVN);
 	        return (err);
 	}
-#endif
 
 	/*
 	 * There is no harm in fully initializing the vnode before trying

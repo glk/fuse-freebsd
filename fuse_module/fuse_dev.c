@@ -37,12 +37,8 @@ static d_poll_t  fusedev_poll;
 static d_read_t  fusedev_read;
 static d_write_t fusedev_write;
 
-#ifdef USE_OLD_CLONEHANDLER_API
-void fusedev_clone(void *arg, char *name, int namelen, struct cdev **dev);
-#else
 void fusedev_clone(void *arg, struct ucred *cred, char *name,
                           int namelen, struct cdev **dev);
-#endif
 
 static struct cdevsw fuse_cdevsw = {
 	.d_open = fusedev_open,
@@ -488,14 +484,9 @@ fusedev_write(struct cdev *dev, struct uio *uio, int ioflag)
  * Modeled after tunclone() of net/if_tun.c ...
  * boosted with a hack so that devices can be reused.
  */
-#ifdef USE_OLD_CLONEHANDLER_API
-void
-fusedev_clone(void *arg, char *name, int namelen, struct cdev **dev)
-#else
 void
 fusedev_clone(void *arg, struct ucred *cred, char *name, int namelen,
               struct cdev **dev)
-#endif
 {
 	/*
 	 * Why cloning? We do need per-open info, but we could as well put our

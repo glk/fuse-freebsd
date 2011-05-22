@@ -31,12 +31,8 @@ struct mtx fuse_mtx;
 #endif
 
 
-#ifdef USE_OLD_CLONEHANDLER_API
-extern void fusedev_clone(void *arg, char *name, int namelen, struct cdev **dev);
-#else
 extern void fusedev_clone(void *arg, struct ucred *cred, char *name,
                           int namelen, struct cdev **dev);
-#endif
 
 extern struct vfsops fuse_vfsops;
 extern struct cdevsw fuse_cdevsw;
