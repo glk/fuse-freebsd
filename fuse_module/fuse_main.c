@@ -108,6 +108,9 @@ fuse_loader(struct module *m, int what, void *arg)
 	switch (what) {
 	case MOD_LOAD:                /* kldload */
 
+#if __FreeBSD_version > 800009
+	        fuse_fileops.fo_truncate = vnops.fo_truncate;
+#endif
 		fuse_fileops.fo_ioctl    = vnops.fo_ioctl;
 		fuse_fileops.fo_poll     = vnops.fo_poll;
 		fuse_fileops.fo_kqfilter = vnops.fo_kqfilter;

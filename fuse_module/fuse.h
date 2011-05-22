@@ -25,6 +25,22 @@
 #endif
 #endif
 
+#ifndef VFSOPS_TAKES_THREAD
+#if __FreeBSD_version >= 800087
+#define VFSOPS_TAKES_THREAD 0
+#else
+#define VFSOPS_TAKES_THREAD 1
+#endif
+#endif
+
+#ifndef VOP_ACCESS_TAKES_ACCMODE_T
+#if __FreeBSD_version >= 800052
+#define VOP_ACCESS_TAKES_ACCMODE_T 1
+#else
+#define VOP_ACCESS_TAKES_ACCMODE_T 0
+#endif
+#endif
+
 #ifndef VOP_OPEN_TAKES_FP
 #if __FreeBSD_version >= 700044
 #define VOP_OPEN_TAKES_FP 1
@@ -46,6 +62,14 @@
 #define VOP_UNLOCK_TAKES_THREAD 0
 #else
 #define VOP_UNLOCK_TAKES_THREAD 1
+#endif
+#endif
+
+#ifndef VOP_GETATTR_TAKES_THREAD
+#if __FreeBSD_version >= 800046
+#define VOP_GETATTR_TAKES_THREAD 0
+#else
+#define VOP_GETATTR_TAKES_THREAD 1
 #endif
 #endif
 

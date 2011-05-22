@@ -1,3 +1,5 @@
+.undef KERNCONF
+
 .include "../Makefile.common"
 
 SRCS = fuse_main.c    \
@@ -22,7 +24,8 @@ CFLAGS+= -DFMASTER
 
 .if defined(KERNCONF)
 KERNCONF1!= echo ${KERNCONF} | sed -e 's/ .*//g'
-KERNCONFDIR= /usr/obj/usr/src/sys/${KERNCONF1}
+KRNLOBJDIR!=	make -C /usr/src -f /usr/src/Makefile.inc1 -V KRNLOBJDIR
+KERNCONFDIR= ${KRNLOBJDIR}/${KERNCONF1}
 .endif
 
 .if defined(KERNCONFDIR)
