@@ -1,3 +1,6 @@
+#ifndef _FUSE_NODE_H_
+#define _FUSE_NODE_H_
+
 /*
  * Private data of a fuse vnode
  */
@@ -74,3 +77,5 @@ struct get_filehandle_param {
 int fuse_get_filehandle(struct vnode *vp, struct thread *td, struct ucred *cred,
                    int mode, struct fuse_filehandle **fufhp,
                    struct get_filehandle_param *gefhp);
+
+#endif /* _FUSE_NODE_H_ */
