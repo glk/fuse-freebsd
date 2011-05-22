@@ -23,8 +23,8 @@
 #include <sys/sysctl.h>
 
 #include "fuse.h"
+#include "fuse_node.h"
 #include "fuse_session.h"
-#include "fuse_vnode.h"
 
 static struct fuse_ticket *fticket_alloc(struct fuse_data *data);
 static void                fticket_refresh(struct fuse_ticket *tick);

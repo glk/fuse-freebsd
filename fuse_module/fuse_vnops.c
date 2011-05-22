@@ -40,7 +40,7 @@
 #include "fuse.h"
 #include "fuse_internal.h"
 #include "fuse_session.h"
-#include "fuse_vnode.h"
+#include "fuse_node.h"
 #include "fuse_io.h"
 
 #include <sys/priv.h>

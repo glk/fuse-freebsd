@@ -13,7 +13,7 @@ SRCS = fuse_main.c    \
        fuse_session.h \
        fuse_internal.h \
        fuse_io.h      \
-       fuse_vnode.h   \
+       fuse_node.h    \
        vnode_if.h
 
 CFLAGS+= -I../include
