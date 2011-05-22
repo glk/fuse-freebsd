@@ -31,22 +31,22 @@
 static __inline int fuse_ohead_audit(struct fuse_out_header *ohead,
                                      struct uio *uio);
 
-static d_open_t  fusedev_open;
-static d_close_t fusedev_close;
-static d_poll_t  fusedev_poll;
-static d_read_t  fusedev_read;
-static d_write_t fusedev_write;
+static d_open_t  fuse_device_open;
+static d_close_t fuse_device_close;
+static d_poll_t  fuse_device_poll;
+static d_read_t  fuse_device_read;
+static d_write_t fuse_device_write;
 
-void fusedev_clone(void *arg, struct ucred *cred, char *name,
+void fuse_device_clone(void *arg, struct ucred *cred, char *name,
                           int namelen, struct cdev **dev);
 
-static struct cdevsw fuse_cdevsw = {
-	.d_open = fusedev_open,
-	.d_close = fusedev_close,
+static struct cdevsw fuse_device_cdevsw = {
+	.d_open = fuse_device_open,
+	.d_close = fuse_device_close,
 	.d_name = "fuse",
-	.d_poll = fusedev_poll,
-	.d_read = fusedev_read,
-	.d_write = fusedev_write,
+	.d_poll = fuse_device_poll,
+	.d_read = fuse_device_read,
+	.d_write = fuse_device_write,
 	.d_version = D_VERSION,
 #ifndef D_NEEDMINOR
 #define D_NEEDMINOR 0
@@ -78,7 +78,7 @@ struct clonedevs *fuseclones;
  * Resources are set up on a per-open basis
  */
 static int
-fusedev_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
+fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 {
 	struct fuse_data *fdata;	
 
@@ -152,7 +152,7 @@ busy:
 }
 
 static int
-fusedev_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
+fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 {
 	struct fuse_data *data;
 
@@ -205,7 +205,7 @@ out:
 }
 
 int
-fusedev_poll(struct cdev *dev, int events, struct thread *td)
+fuse_device_poll(struct cdev *dev, int events, struct thread *td)
 {
 	struct fuse_data *data;
 	int revents = 0;
@@ -229,12 +229,12 @@ fusedev_poll(struct cdev *dev, int events, struct thread *td)
 }
 
 /*
- * fusedev_read hangs on the queue of VFS messages.
+ * fuse_device_read hangs on the queue of VFS messages.
  * When it's notified that there is a new one, it picks that and
  * passes up to the daemon
  */
 int
-fusedev_read(struct cdev *dev, struct uio *uio, int ioflag)
+fuse_device_read(struct cdev *dev, struct uio *uio, int ioflag)
 {
 	int err = 0;
 	struct fuse_data *data;
@@ -339,7 +339,7 @@ again:
 	}
 
 	/*
-	 * fusedev_read will drop "not owned" tickets
+	 * fuse_device_read will drop "not owned" tickets
 	 * (used when the one who inserted the message thinks the daemon
 	 * won't aswer)
 	 */
@@ -372,13 +372,13 @@ fuse_ohead_audit(struct fuse_out_header *ohead, struct uio *uio)
 }	
 
 /*
- * fusedev_write first reads the header sent by the daemon.
+ * fuse_device_write first reads the header sent by the daemon.
  * If that's OK, looks up ticket/callback node by the unique id seen in header.
  * If the callback node contains a handler function, the uio is passed over
  * that.
  */
 static int
-fusedev_write(struct cdev *dev, struct uio *uio, int ioflag)
+fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 {
 #if _DEBUG_MSG
 	static int counter=0;
@@ -485,7 +485,7 @@ fusedev_write(struct cdev *dev, struct uio *uio, int ioflag)
  * boosted with a hack so that devices can be reused.
  */
 void
-fusedev_clone(void *arg, struct ucred *cred, char *name, int namelen,
+fuse_device_clone(void *arg, struct ucred *cred, char *name, int namelen,
               struct cdev **dev)
 {
 	/*
@@ -542,9 +542,9 @@ fusedev_clone(void *arg, struct ucred *cred, char *name, int namelen,
 	}
 
 	/* find any existing device, or allocate new unit number */
-	i = clone_create(&fuseclones, &fuse_cdevsw, &unit, dev, 0);
+	i = clone_create(&fuseclones, &fuse_device_cdevsw, &unit, dev, 0);
 	if (i) {
-		*dev = make_dev(&fuse_cdevsw,
+		*dev = make_dev(&fuse_device_cdevsw,
 #if __FreeBSD_version < 800062
 				unit2minor(unit),
 #else /* __FreeBSD_version >= 800062 */
