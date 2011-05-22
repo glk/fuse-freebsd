@@ -40,6 +40,7 @@
 #endif
 
 #include "fuse.h"
+#include "fuse_file.h"
 #include "fuse_node.h"
 #include "fuse_session.h"
 #include "fuse_io.h"

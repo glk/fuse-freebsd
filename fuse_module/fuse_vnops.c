@@ -38,6 +38,7 @@
 #include <vm/vm_object.h>
 
 #include "fuse.h"
+#include "fuse_file.h"
 #include "fuse_internal.h"
 #include "fuse_session.h"
 #include "fuse_node.h"
