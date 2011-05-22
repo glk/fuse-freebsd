@@ -11,6 +11,7 @@ SRCS = fuse_main.c    \
        fuse_subr.c    \
        fuse.h         \
        fuse_session.h \
+       fuse_internal.h \
        fuse_io.h      \
        fuse_vnode.h   \
        vnode_if.h

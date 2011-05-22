@@ -38,6 +38,7 @@
 #include <vm/vm_object.h>
 
 #include "fuse.h"
+#include "fuse_internal.h"
 #include "fuse_session.h"
 #include "fuse_vnode.h"
 #include "fuse_io.h"
@@ -48,27 +49,6 @@
 typedef int fuse_metrics_t(struct fuse_filehandle *fufh, struct thread *td,
                            struct ucred *cred, void *param);
 
-/* access related data */
-
-struct fuse_access_param {
-	uid_t xuid;
-	gid_t xgid;
-
-	unsigned facc_flags;
-};
-
-#define FACCESS_VA_VALID   0x01 /* flag to sign to reuse cached attributes
-                                   regardless of cache timeout */
-#define FACCESS_DO_ACCESS  0x02 /* flag showing if we are to do access check */
-#define FACCESS_STICKY     0x04 /* do sticky dir permission check */
-#define FACCESS_CHOWN      0x08 /* do permission check for owner changing */
-#define FACCESS_NOCHECKSPY 0x10 /* don't check if daemon is allowed to spy on
-                                   user */
-#define FACCESS_SETGID     0x12 /* do permission check for setting setgid flag */
-
-#define FACCESS_XQUERIES FACCESS_STICKY | FACCESS_CHOWN | FACCESS_SETGID
-
-#define FVP_ACCESS_NOOP   0x01 /* vnode based control flag for doing access check */
 
 /* parameter struct for fuse_standard_metrics() */
 struct standard_metrics_param {
