@@ -19,7 +19,7 @@
 #include <sys/selinfo.h>
 
 #include "fuse.h"
-#include "fuse_session.h"
+#include "fuse_ipc.h"
 
 #if _DEBUG || _DEBUG2G || _DEBUG3G || defined(INVARIANTS) || FUSELIB_CONFORM_BIOREAD
 int

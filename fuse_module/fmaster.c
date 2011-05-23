@@ -22,7 +22,7 @@
 #include <sys/sysctl.h>
 
 #include "fuse.h"
-#include "fuse_session.h"
+#include "fuse_ipc.h"
 
 #if ! FUSE_KERNELABI_GEQ(7, 5)
 #define fuse_init_out fuse_init_in_out

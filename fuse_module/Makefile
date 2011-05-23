@@ -10,7 +10,7 @@ SRCS = fuse_main.c    \
        fuse_io.c      \
        fuse_subr.c    \
        fuse.h         \
-       fuse_session.h \
+       fuse_ipc.h     \
        fuse_file.h \
        fuse_internal.h \
        fuse_io.h      \

@@ -26,7 +26,7 @@
 #include <sys/selinfo.h>
 
 #include "fuse.h"
-#include "fuse_session.h"
+#include "fuse_ipc.h"
 
 static __inline int fuse_ohead_audit(struct fuse_out_header *ohead,
                                      struct uio *uio);

@@ -22,7 +22,7 @@
 
 #include "fuse.h"
 #include "fuse_node.h"
-#include "fuse_session.h"
+#include "fuse_ipc.h"
 
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>

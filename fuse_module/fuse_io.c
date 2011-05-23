@@ -42,7 +42,7 @@
 #include "fuse.h"
 #include "fuse_file.h"
 #include "fuse_node.h"
-#include "fuse_session.h"
+#include "fuse_ipc.h"
 #include "fuse_io.h"
 
 int fuse_read_directbackend(struct fuse_io_data *fioda);
