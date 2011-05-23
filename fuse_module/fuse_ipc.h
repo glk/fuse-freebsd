@@ -135,6 +135,11 @@ enum mountpri { FM_NOMOUNTED, FM_PRIMARY, FM_SECONDARY };
 
 struct fuse_data {
     enum mountpri              mpri;
+    int                        mntco;
+    struct cdev               *fdev;
+    struct mount              *mp;
+    struct ucred              *daemoncred;
+    int                        dataflag;
 
     /* queue for upgoing messages */
     struct mtx                 ms_mtx;
@@ -158,18 +163,11 @@ struct fuse_data {
 
     struct sx                  rename_lock;
 
-    struct ucred *daemoncred;
-
     struct selinfo ks_rsel;
 
-    int dataflag;
-
-    struct cdev *fdev;
-    struct mount *mp;
     struct vnode *rvp;
 
     /* mount info */
-    int mntco;
     struct sx mhierlock;
     LIST_HEAD(, fuse_secondary_data) slaves_head;
 
