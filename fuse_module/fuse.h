@@ -195,6 +195,9 @@ do {						\
 #endif
 #endif
 
+#define debug_printf(fmt, ...) DEBUG(fmt, ## __VA_ARGS__)
+#define kdebug_printf(fmt, ...) DEBUG(fmt, ## __VA_ARGS__)
+
 #if _DEBUG || _DEBUG2G || _DEBUG3G || FMASTER
 extern char *fuse_opnames[];
 extern int fuse_opnames_entries;
