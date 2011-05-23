@@ -37,7 +37,7 @@ do {                                                   \
     (spc2) = (char *)(fiov)->base + (sizeof(*(spc1))); \
 } while (0)
 
-#define FU_AT_LEAST(siz) max(siz, 128)
+#define FU_AT_LEAST(siz) max((siz), 128)
 
 struct fuse_ticket;
 struct fuse_data;
