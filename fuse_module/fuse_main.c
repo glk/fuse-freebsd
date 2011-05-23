@@ -39,10 +39,6 @@ extern struct cdevsw fuse_cdevsw;
 extern struct vop_vector fuse_vnops;
 extern struct fileops fuse_fileops;
 extern struct clonedevs *fuseclones;
-#if FMASTER
-extern struct cdevsw fmaster_cdevsw[5];
-static struct cdev *fmaster_dev[5];
-#endif
 extern int fuse_pbuf_freecnt;
 #if FUSE_HAS_CREATE
 extern struct vop_vector fuse_germ_vnops;
@@ -71,21 +67,12 @@ SYSCTL_INT(_vfs_fuse, OID_AUTO, kernelabi_minor, CTLFLAG_RD,
 static void
 fuse_bringdown(eventhandler_tag eh_tag)
 {
-#if FMASTER
-	int i;
-#endif
 
 	EVENTHANDLER_DEREGISTER(dev_clone, eh_tag);
 
 	clone_cleanup(&fuseclones);
 #if USE_FUSE_LOCK
 	mtx_destroy(&fuse_mtx);
-#endif
-#if FMASTER
-	for (i = 0; i < 5; i++) {
-		DEBUG("destroying fmaster%d\n", i);	
-		destroy_dev(fmaster_dev[i]);
-	}
 #endif
 }
 
@@ -94,10 +81,6 @@ fuse_loader(struct module *m, int what, void *arg)
 {
 	static eventhandler_tag  eh_tag = NULL;
 	int err = 0;
-#if FMASTER
-	int i;
-	char *fmaster_name = "fmasterx";
-#endif
 
 	GIANT_REQUIRED;
 
@@ -133,14 +116,6 @@ fuse_loader(struct module *m, int what, void *arg)
 #endif
 			return (ENOMEM);
 		}
-#if FMASTER
-		for (i=0; i<5; i++) {
-			fmaster_name[7] = i + '0';
-			fmaster_dev[i] = make_dev(&fmaster_cdevsw[i], 0,
-                                                  UID_ROOT, GID_WHEEL,
-						  S_IWUSR, fmaster_name);
-		}
-#endif
 		/* Duh, it's static... */
 		/* vfs_register(&fuse_vfsconf); */
 
