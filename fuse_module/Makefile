@@ -3,7 +3,7 @@
 .include "../Makefile.common"
 
 SRCS = fuse_main.c    \
-       fuse_msg.c     \
+       fuse_ipc.c     \
        fuse_device.c  \
        fuse_vfsops.c  \
        fuse_vnops.c   \
