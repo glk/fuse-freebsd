@@ -43,16 +43,16 @@
 
 static vfs_hash_cmp_t fuse_vnode_bgdrop_cmp;
 
-static vfs_mount_t fuse_mount;
-static vfs_unmount_t fuse_unmount;
-static vfs_root_t fuse_root;
-static vfs_statfs_t fuse_statfs;
+static vfs_mount_t fuse_vfs_mount;
+static vfs_unmount_t fuse_vfs_unmount;
+static vfs_root_t fuse_vfs_root;
+static vfs_statfs_t fuse_vfs_statfs;
 
 struct vfsops fuse_vfsops = {
-	.vfs_mount   = fuse_mount,
-	.vfs_unmount = fuse_unmount,
-	.vfs_root    = fuse_root,
-	.vfs_statfs  = fuse_statfs,
+	.vfs_mount   = fuse_vfs_mount,
+	.vfs_unmount = fuse_vfs_unmount,
+	.vfs_root    = fuse_vfs_root,
+	.vfs_statfs  = fuse_vfs_statfs,
 };
 
 SYSCTL_INT(_vfs_fuse, OID_AUTO, init_backgrounded, CTLFLAG_RD,
@@ -130,7 +130,7 @@ fuse_vnode_bgdrop_cmp(struct vnode *vp, void *param)
  * Mount system call
  */
 static int
-fuse_mount(struct mount *mp)
+fuse_vfs_mount(struct mount *mp)
 {
 	struct thread *td = curthread;
 	int err = 0;
@@ -435,7 +435,7 @@ out:
  * Unmount system call
  */
 static int
-fuse_unmount(struct mount *mp, int mntflags)
+fuse_vfs_unmount(struct mount *mp, int mntflags)
 {
 	struct thread *td = curthread;
 	int flags = 0, err = 0;
@@ -540,7 +540,7 @@ unlock:
 
 /* stolen from portalfs */
 static int
-fuse_root(struct mount *mp, int flags, struct vnode **vpp)
+fuse_vfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	/*
 	 * Return locked reference to root.
@@ -558,7 +558,7 @@ fuse_root(struct mount *mp, int flags, struct vnode **vpp)
 		data = fsdat->master;
 		sx_slock(&data->mhierlock);
 		if (data->mpri == FM_PRIMARY)
-			err = fuse_root(data->mp, flags, vpp);
+			err = fuse_vfs_root(data->mp, flags, vpp);
 		else
 			err = ENXIO;
 		sx_sunlock(&data->mhierlock);
@@ -582,7 +582,7 @@ fuse_root(struct mount *mp, int flags, struct vnode **vpp)
 }
 
 static int
-fuse_statfs(struct mount *mp, struct statfs *sbp)
+fuse_vfs_statfs(struct mount *mp, struct statfs *sbp)
 {
 	struct thread *td = curthread;
 	struct fuse_dispatcher fdi;
@@ -601,7 +601,7 @@ fuse_statfs(struct mount *mp, struct statfs *sbp)
 
 		sx_slock(&data->mhierlock);
 		if (data->mpri == FM_PRIMARY)
-			err = fuse_statfs(data->mp, sbp);
+			err = fuse_vfs_statfs(data->mp, sbp);
 		else
 			err = ENXIO;
 		sx_sunlock(&data->mhierlock);
