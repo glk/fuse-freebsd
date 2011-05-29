@@ -437,106 +437,109 @@ out:
 static int
 fuse_vfs_unmount(struct mount *mp, int mntflags)
 {
-	struct thread *td = curthread;
-	int flags = 0, err = 0;
-	struct fuse_data *data;
-	struct fuse_secondary_data *fsdat = NULL;
-	struct cdev *fdev;
+    int err   = 0;
+    int flags = 0;
 
-	GIANT_REQUIRED;
+    struct fuse_data      *data;
+    struct cdev           *fdev;
+    struct fuse_secondary_data *fsdat = NULL;
+    struct thread *td = curthread;
 
-	DEBUG2G("mp %p: %s\n", mp, mp->mnt_stat.f_mntfromname);
-	/* Flag handling */
-	if (mntflags & MNT_FORCE)
-		flags |= FORCECLOSE;
+    fuse_trace_printf_vfsop();
 
-	data = fusefs_get_data(mp);
-	if (! data) {
-		fsdat = fusefs_get_secdata(mp);
-		data = fsdat->master;
-	}
+    GIANT_REQUIRED;
 
-	if (sx_try_xlock(&data->mhierlock) == 0) {
-		DEBUG2G("lock contested\n");
-		return (EBUSY);
-	}
-	if (! fsdat) {
+    /* Flag handling */
+    if (mntflags & MNT_FORCE) {
+        flags |= FORCECLOSE;
+    }
+
+    data = fusefs_get_data(mp);
+    if (!data) {
+        fsdat = fusefs_get_secdata(mp);
+        data = fsdat->master;
+    }
+
+    if (sx_try_xlock(&data->mhierlock) == 0) {
+        DEBUG2G("lock contested\n");
+        return (EBUSY);
+    }
+    if (! fsdat) {
 #if _DEBUG
-		struct vnode *vp, *nvp;
+            struct vnode *vp, *nvp;
 #endif
 
-		if (! (mntflags & MNT_FORCE ||
-		    data->dataflag & FSESS_NEGLECT_SHARES ||
-		    LIST_EMPTY(&data->slaves_head))) {
-			err = EBUSY;
-			goto unlock;
-		}
+            if (! (mntflags & MNT_FORCE ||
+                data->dataflag & FSESS_NEGLECT_SHARES ||
+                LIST_EMPTY(&data->slaves_head))) {
+                    err = EBUSY;
+                    goto unlock;
+            }
 
 #if _DEBUG
-		MNT_ILOCK(mp);
-		DEBUG2G("vnodes:\n");
-		MNT_VNODE_FOREACH(vp, mp, nvp) {
-			DEBUG2G("\n");
-			vn_printf(vp, "...");
-		}
-		MNT_IUNLOCK(mp);
+            MNT_ILOCK(mp);
+            DEBUG2G("vnodes:\n");
+            MNT_VNODE_FOREACH(vp, mp, nvp) {
+                    DEBUG2G("\n");
+                    vn_printf(vp, "...");
+            }
+            MNT_IUNLOCK(mp);
 #endif
 
-		/* Flush files -> vflush */
-		/* There is 1 extra root vnode reference (mp->mnt_data). */
-		if ((err = vflush(mp, 1, flags, td))) {
-			DEBUG2G("err %d\n", err);
-			goto unlock;
-		}
-	}
+            /* Flush files -> vflush */
+            /* There is 1 extra root vnode reference (mp->mnt_data). */
+            if ((err = vflush(mp, 1, flags, td))) {
+                    DEBUG2G("err %d\n", err);
+                    goto unlock;
+            }
+    }
 
-	if (fsdat) {
-		LIST_REMOVE(fsdat, slaves_link);
-		free(fsdat, M_FUSEVFS);
-	} else {
+    if (fsdat) {
+            LIST_REMOVE(fsdat, slaves_link);
+            free(fsdat, M_FUSEVFS);
+    } else {
 #if FUSE_HAS_DESTROY
-		if (data->dataflag & FSESS_SYNC_UNMOUNT &&
-		    ((sync_unmount == 1 &&
-	              data->dataflag & FSESS_CAN_SYNC_UNMOUNT) ||
-		     sync_unmount == 2) &&
-		    !(mntflags & MNT_FORCE)) {
-			struct fuse_dispatcher fdi;
+            if (data->dataflag & FSESS_SYNC_UNMOUNT &&
+                ((sync_unmount == 1 &&
+                  data->dataflag & FSESS_CAN_SYNC_UNMOUNT) ||
+                 sync_unmount == 2) &&
+                !(mntflags & MNT_FORCE)) {
+                    struct fuse_dispatcher fdi;
 
-			fdisp_init(&fdi, 0);
-			fdisp_make(&fdi, mp, FUSE_DESTROY, FUSE_ROOT_ID, td,
-			           NULL);
-			fdisp_wait_answ(&fdi);
-			/* ignore return value */
-		}
+                    fdisp_init(&fdi, 0);
+                    fdisp_make(&fdi, mp, FUSE_DESTROY, FUSE_ROOT_ID, td,
+                               NULL);
+                    fdisp_wait_answ(&fdi);
+                    /* ignore return value */
+            }
 #endif
-		fdata_kick_set(data);
+            fdata_kick_set(data);
 
-		data->mpri = FM_NOMOUNTED;
-	}
+            data->mpri = FM_NOMOUNTED;
+    }
 
 unlock:
-	sx_xunlock(&data->mhierlock);
-	if (err)
-		return (err);
+    sx_xunlock(&data->mhierlock);
+    if (err)
+            return (err);
 
-	data->mntco--;
-	FUSE_LOCK;
-	fdev = data->fdev;
-	DEBUG2G("mntco %d, opened 0x%x\n",
-	        data->mntco, data->dataflag & FSESS_OPENED);
-	if (data->mntco == 0 && ! (data->dataflag & FSESS_OPENED)) {
-		data->fdev->si_drv1 = NULL;
-		fdata_destroy(data);
-	}
-	FUSE_UNLOCK;
-	dev_rel(fdev);
-	mp->mnt_data = NULL;
+    data->mntco--;
 
-	/* Other guys do this, I don't know what it is good for... */
-	mp->mnt_flag &= ~MNT_LOCAL;
+    FUSE_LOCK;
+    fdev = data->fdev;
+    if (data->mntco == 0 && !(data->dataflag & FSESS_OPENED)) {
+        data->fdev->si_drv1 = NULL;
+        fdata_destroy(data);
+    }
+    FUSE_UNLOCK;
+    dev_rel(fdev);
+    mp->mnt_data = NULL;
 
-	return (0);
-}		
+    /* Other guys do this, I don't know what it is good for... */
+    mp->mnt_flag &= ~MNT_LOCAL;
+
+    return (0);
+}        
 
 /* stolen from portalfs */
 static int
