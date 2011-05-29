@@ -28,71 +28,78 @@
 int
 fuse_init_handler(struct fuse_ticket *tick, struct uio *uio)
 {
-	struct fuse_data *data = tick->tk_data;
+    int err = 0;
+    struct fuse_data     *data = tick->tk_data;
 #if FUSE_KERNELABI_GEQ(7, 5)
-	struct fuse_init_out *fiio;
+    struct fuse_init_out *fiio;
 #else
-	struct fuse_init_in_out *fiio;
+    struct fuse_init_in_out *fiio;
 #endif
-	int err = 0;
 
-	if ((err = tick->tk_aw_ohead.error))
-		goto out;
-	if ((err = fticket_pull(tick, uio)))
-		goto out;
+    if ((err = tick->tk_aw_ohead.error)) {
+        goto out;
+    }
 
-	fiio = fticket_resp(tick)->base;
+    if ((err = fticket_pull(tick, uio))) {
+        goto out;
+    }
 
-	/* XXX is the following check adequate? */
-	if (fiio->major < 7) {
-		DEBUG2G("userpace version too low\n");
-		err = EPROTONOSUPPORT;
-		goto out;
-	}
+    fiio = fticket_resp(tick)->base;
 
-	data->fuse_libabi_major = fiio->major;
-	data->fuse_libabi_minor = fiio->minor;
+    /* XXX is the following check adequate? */
+    if (fiio->major < 7) {
+        DEBUG2G("userpace version too low\n");
+        err = EPROTONOSUPPORT;
+        goto out;
+    }
 
-	if (FUSE_KERNELABI_GEQ(7, 5) && fuse_libabi_geq(data, 7, 5)) {
+    data->fuse_libabi_major = fiio->major;
+    data->fuse_libabi_minor = fiio->minor;
+
+    if (FUSE_KERNELABI_GEQ(7, 5) && fuse_libabi_geq(data, 7, 5)) {
 #if FUSE_KERNELABI_GEQ(7, 5)
-		if (fticket_resp(tick)->len == sizeof(struct fuse_init_out))
-			data->max_write = fiio->max_write;
-		else
-			err = EINVAL;
+        if (fticket_resp(tick)->len == sizeof(struct fuse_init_out)) {
+            data->max_write = fiio->max_write;
+        } else {
+            err = EINVAL;
+        }
 #endif
-	} else
-		/* Old fix values */
-		data->max_write = 4096;
+    } else {
+        /* Old fix values */
+        data->max_write = 4096;
+    }
 
 out:
-	fuse_ticket_drop(tick);
-	if (err)
-		fdata_kick_set(data);
+    fuse_ticket_drop(tick);
 
-	mtx_lock(&data->ticket_mtx);
-	data->dataflag |= FSESS_INITED;
-	wakeup(&data->ticketer);
-	mtx_unlock(&data->ticket_mtx);
+    if (err) {
+        fdata_kick_set(data);
+    }
 
-	return (0);
+    mtx_lock(&data->ticket_mtx);
+    data->dataflag |= FSESS_INITED;
+    wakeup(&data->ticketer);
+    mtx_unlock(&data->ticket_mtx);
+
+    return (0);
 }
 
 void
 fuse_send_init(struct fuse_data *data, struct thread *td)
 {
 #if FUSE_KERNELABI_GEQ(7, 5)
-	struct fuse_init_in *fiii;
+    struct fuse_init_in   *fiii;
 #else
-	struct fuse_init_in_out *fiii;
+    struct fuse_init_in_out *fiii;
 #endif
-	struct fuse_dispatcher fdi;
+    struct fuse_dispatcher fdi;
 
-	fdisp_init(&fdi, sizeof(*fiii));
-	fdisp_make(&fdi, data->mp, FUSE_INIT, 0, td, NULL);
-	fiii = fdi.indata;
-	fiii->major = FUSE_KERNEL_VERSION;
-	fiii->minor = FUSE_KERNEL_MINOR_VERSION;
+    fdisp_init(&fdi, sizeof(*fiii));
+    fdisp_make(&fdi, data->mp, FUSE_INIT, 0, td, NULL);
+    fiii = fdi.indata;
+    fiii->major = FUSE_KERNEL_VERSION;
+    fiii->minor = FUSE_KERNEL_MINOR_VERSION;
 
-	fuse_insert_callback(fdi.tick, fuse_init_handler);
-	fuse_insert_message(fdi.tick);
+    fuse_insert_callback(fdi.tick, fuse_init_handler);
+    fuse_insert_message(fdi.tick);
 }
