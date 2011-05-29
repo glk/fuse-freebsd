@@ -6,6 +6,13 @@
 #ifndef _FUSE_INTERNAL_H_
 #define _FUSE_INTERNAL_H_
 
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <sys/vnode.h>
+
+#include "fuse_ipc.h"
+#include "fuse_node.h"
+
 /* access related data */
 
 #define FACCESS_VA_VALID   0x01 /* flag to sign to reuse cached attributes
@@ -27,5 +34,9 @@ struct fuse_access_param {
 
 	unsigned facc_flags;
 };
+
+
+int fuse_init_handler(struct fuse_ticket *tick, struct uio *uio);
+void fuse_send_init(struct fuse_data *data, struct thread *td);
 
 #endif /* _FUSE_INTERNAL_H_ */

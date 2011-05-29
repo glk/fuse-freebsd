@@ -23,6 +23,7 @@
 #include "fuse.h"
 #include "fuse_node.h"
 #include "fuse_ipc.h"
+#include "fuse_internal.h"
 
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
@@ -40,8 +41,6 @@
 #endif
 
 
-static int fuse_init_handler(struct fuse_ticket *tick, struct uio *uio);
-static void fuse_send_init(struct fuse_data *data, struct thread *td);
 static vfs_hash_cmp_t fuse_vnode_bgdrop_cmp;
 
 static vfs_mount_t fuse_mount;
@@ -69,65 +68,6 @@ SYSCTL_UINT(_vfs_fuse, OID_AUTO, sync_unmount, CTLFLAG_RW,
 MALLOC_DEFINE(M_FUSEVFS, "fuse_filesystem", "buffer for fuse vfs layer");
 
 extern struct vop_vector fuse_vnops;
-
-
-/********************
- *
- * >>> callback handlers for VFS ops
- *
- ********************/
-
-static int
-fuse_init_handler(struct fuse_ticket *tick, struct uio *uio)
-{
-	struct fuse_data *data = tick->tk_data;
-#if FUSE_KERNELABI_GEQ(7, 5)
-	struct fuse_init_out *fiio;
-#else
-	struct fuse_init_in_out *fiio;
-#endif
-	int err = 0;
-
-	if ((err = tick->tk_aw_ohead.error))
-		goto out;
-	if ((err = fticket_pull(tick, uio)))
-		goto out;
-
-	fiio = fticket_resp(tick)->base;
-
-	/* XXX is the following check adequate? */
-	if (fiio->major < 7) {
-		DEBUG2G("userpace version too low\n");
-		err = EPROTONOSUPPORT;
-		goto out;
-	}
-
-	data->fuse_libabi_major = fiio->major;
-	data->fuse_libabi_minor = fiio->minor;
-
-	if (FUSE_KERNELABI_GEQ(7, 5) && fuse_libabi_geq(data, 7, 5)) {
-#if FUSE_KERNELABI_GEQ(7, 5)
-		if (fticket_resp(tick)->len == sizeof(struct fuse_init_out))
-			data->max_write = fiio->max_write;
-		else
-			err = EINVAL;
-#endif
-	} else
-		/* Old fix values */
-		data->max_write = 4096;
-
-out:
-	fuse_ticket_drop(tick);
-	if (err)
-		fdata_kick_set(data);
-
-	mtx_lock(&data->ticket_mtx);
-	data->dataflag |= FSESS_INITED;
-	wakeup(&data->ticketer);
-	mtx_unlock(&data->ticket_mtx);
-
-	return (0);
-}
 
 /******************
  *
@@ -185,26 +125,6 @@ fuse_vnode_bgdrop_cmp(struct vnode *vp, void *param)
  * >>> VFS ops
  *
  *************/
-
-static __inline void
-fuse_send_init(struct fuse_data *data, struct thread *td)
-{
-#if FUSE_KERNELABI_GEQ(7, 5)
-	struct fuse_init_in *fiii;
-#else
-	struct fuse_init_in_out *fiii;
-#endif
-	struct fuse_dispatcher fdi;
-
-	fdisp_init(&fdi, sizeof(*fiii));
-	fdisp_make(&fdi, data->mp, FUSE_INIT, 0, td, NULL);
-	fiii = fdi.indata;
-	fiii->major = FUSE_KERNEL_VERSION;
-	fiii->minor = FUSE_KERNEL_MINOR_VERSION;
-
-	fuse_insert_callback(fdi.tick, fuse_init_handler);
-	fuse_insert_message(fdi.tick);
-}
 
 /*
  * Mount system call
