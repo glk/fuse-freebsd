@@ -415,7 +415,7 @@ rootdone:
 
 	if (! secondary)
 		/* Now handshaking with daemon */
-		fuse_send_init(data, td);
+		fuse_internal_send_init(data, td);
 
 out:
 	if (err ) {

@@ -26,7 +26,7 @@
 #include "fuse_internal.h"
 
 int
-fuse_init_handler(struct fuse_ticket *tick, struct uio *uio)
+fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
 {
     int err = 0;
     struct fuse_data     *data = tick->tk_data;
@@ -85,7 +85,7 @@ out:
 }
 
 void
-fuse_send_init(struct fuse_data *data, struct thread *td)
+fuse_internal_send_init(struct fuse_data *data, struct thread *td)
 {
 #if FUSE_KERNELABI_GEQ(7, 5)
     struct fuse_init_in   *fiii;
@@ -100,6 +100,6 @@ fuse_send_init(struct fuse_data *data, struct thread *td)
     fiii->major = FUSE_KERNEL_VERSION;
     fiii->minor = FUSE_KERNEL_MINOR_VERSION;
 
-    fuse_insert_callback(fdi.tick, fuse_init_handler);
+    fuse_insert_callback(fdi.tick, fuse_internal_init_callback);
     fuse_insert_message(fdi.tick);
 }

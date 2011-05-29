@@ -36,7 +36,9 @@ struct fuse_access_param {
 };
 
 
-int fuse_init_handler(struct fuse_ticket *tick, struct uio *uio);
-void fuse_send_init(struct fuse_data *data, struct thread *td);
+/* fuse start/stop */
+
+int fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio);
+void fuse_internal_send_init(struct fuse_data *data, struct thread *td);
 
 #endif /* _FUSE_INTERNAL_H_ */
