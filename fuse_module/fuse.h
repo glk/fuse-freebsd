@@ -195,6 +195,22 @@ do {						\
 #endif
 #endif
 
+#ifdef FUSE_TRACE
+#define fuse_trace_printf(fmt, ...) printf(fmt, ## __VA_ARGS__)
+#define fuse_trace_printf_func()    printf("%s\n", __FUNCTION__)
+#else
+#define fuse_trace_printf(fmt, ...) {}
+#define fuse_trace_printf_func()    {}
+#endif
+
+#ifdef FUSE_TRACE_OP
+#define fuse_trace_printf_vfsop() printf("%s\n", __FUNCTION__)
+#define fuse_trace_printf_vnop()  printf("%s\n", __FUNCTION__)
+#else
+#define fuse_trace_printf_vfsop() {}
+#define fuse_trace_printf_vnop()  {}
+#endif
+
 #define debug_printf(fmt, ...) DEBUG(fmt, ## __VA_ARGS__)
 #define kdebug_printf(fmt, ...) DEBUG(fmt, ## __VA_ARGS__)
 
