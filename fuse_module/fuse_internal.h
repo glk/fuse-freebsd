@@ -14,6 +14,42 @@
 #include "fuse_ipc.h"
 #include "fuse_node.h"
 
+static __inline struct mount *
+vnode_mount(struct vnode *vp)
+{
+	return (vp->v_mount);
+}
+
+static __inline enum vtype
+vnode_vtype(struct vnode *vp)
+{
+    return (vp->v_type);
+}
+
+static __inline int
+vnode_isvroot(struct vnode *vp)
+{
+    return ((vp->v_vflag & VV_ROOT) != 0 ? 1 : 0);
+}
+
+static __inline ssize_t
+uio_resid(struct uio *uio)
+{
+    return (uio->uio_resid);
+}
+
+static __inline off_t
+uio_offset(struct uio *uio)
+{
+    return (uio->uio_offset);
+}
+
+static __inline void
+uio_setoffset(struct uio *uio, off_t offset)
+{
+    uio->uio_offset = offset;
+}
+
 /* XXX */
 struct fuse_pidcred {
 	pid_t pid;
