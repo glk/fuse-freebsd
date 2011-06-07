@@ -291,7 +291,7 @@ again:
 		DEBUG2G("reader is to be sacked\n");
 		if (tick) {
 			DEBUG2G("weird -- \"kick\" is set tho there is message\n");
-			fuse_ticket_drop_notowned(tick);
+			fuse_ticket_drop_invalid(tick);
 		}
 		return (ENODEV); /* This should make the daemon get off of us */
 	}
@@ -343,7 +343,7 @@ again:
 	 * (used when the one who inserted the message thinks the daemon
 	 * won't aswer)
 	 */
-	fuse_ticket_drop_notowned(tick);
+	fuse_ticket_drop_invalid(tick);
 
 	return (err);
 }

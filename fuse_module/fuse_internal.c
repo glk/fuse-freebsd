@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2006 Google. All Rights Reserved.
+ * Amit Singh <singh@>
+ */
+
 #include "config.h"
 
 #include <sys/types.h>
@@ -29,9 +34,14 @@
 #include <sys/priv.h>
 
 #include "fuse.h"
-#include "fuse_node.h"
-#include "fuse_ipc.h"
+#include "fuse_file.h"
 #include "fuse_internal.h"
+#include "fuse_ipc.h"
+#include "fuse_node.h"
+#include "fuse_file.h"
+// #include "fuse_nodehash.h"
+#include "fuse_param.h"
+// #include "fuse_sysctl.h"
 
 /* access */
 
@@ -213,43 +223,6 @@ static __inline int
 fuse_check_spyable(struct fuse_dispatcher *fdip, struct mount *mp,
                    struct thread *td, struct ucred *cred)
 {
-	struct fuse_data *data = fusefs_get_data(mp);
-	struct fuse_secondary_data *x_fsdat;
-	int denied;
-
-	if (data->dataflag & FSESS_DAEMON_CAN_SPY)
-		return (0);
-
-	/*
-	 * The policy is to forbid a user from using the filesystem,
-	 * unless she has it mounted.
-	 *
-	 * This is primarily to
-	 * protect her from the daemon spying on her I/O
-	 * operations. Although this is not a concern if the user
-	 * is more privileged than the daemon, we consistently
-	 * demand the per-user mount, in order to be compatible
-	 * with the Linux implementation.
-	 *
-	 * Secondary mounts let arbitrary number of users mount and
-	 * use the filesystem. However, the primary mounter must explicitly
-	 * allow secondary mounts. This is again for providing Linux like
-	 * defaults.
-	 */
-
-	denied = fuse_match_cred(mp->mnt_cred, cred);
-	if (! denied)
-		goto allow;
-
-	LIST_FOREACH(x_fsdat, &data->slaves_head, slaves_link) {
-		denied = fuse_match_cred(x_fsdat->mp->mnt_cred, cred);
-		if (! denied)
-			goto allow;
-	}
-
-	return (EACCES);
-
-allow:
 	return (0);
 }
 
@@ -258,16 +231,97 @@ allow:
 int
 fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio)
 {
-    if (tick->tk_aw_ohead.error == ENOSYS)
-        tick->tk_data->dataflag |=
-         fticket_opcode(tick) == FUSE_FSYNC ?
-         FSESS_NOFSYNC : FSESS_NOFSYNCDIR;
+    fuse_trace_printf_func();
+
+    if (tick->tk_aw_ohead.error == ENOSYS) {
+        tick->tk_data->dataflag |= (fticket_opcode(tick) == FUSE_FSYNC) ?
+                                        FSESS_NOFSYNC : FSESS_NOFSYNCDIR;
+    }
 
     fuse_ticket_drop(tick);
-    return (0);
+
+    return 0;
+}
+
+int
+fuse_internal_fsync(struct vnode           *vp,
+                    struct thread          *td,
+                    struct ucred           *cred,
+                    struct fuse_filehandle *fufh,
+                    void                   *param)
+{
+    int op = FUSE_FSYNC;
+    struct fuse_fsync_in *ffsi;
+    struct fuse_dispatcher *fdip = param;
+
+    fuse_trace_printf_func();
+
+    fdip->iosize = sizeof(*ffsi);
+    fdip->tick = NULL;
+    if (vnode_vtype(vp) == VDIR) {
+        op = FUSE_FSYNCDIR;
+    }
+    
+    fdisp_make_vp(fdip, op, vp, td, cred);
+    ffsi = fdip->indata;
+    ffsi->fh = fufh->fh_id;
+
+    ffsi->fsync_flags = 1;
+  
+    fuse_insert_callback(fdip->tick, fuse_internal_fsync_callback);
+    fuse_insert_message(fdip->tick);
+
+    return 0;
+
 }
 
 /* readdir */
+
+int
+fuse_internal_readdir(struct vnode           *vp,
+                      struct uio             *uio,
+                      struct thread          *td,
+                      struct ucred           *cred,
+                      struct fuse_filehandle *fufh,
+                      struct fuse_iov        *cookediov)
+{
+    int err = 0;
+    struct fuse_dispatcher fdi;
+    struct fuse_read_in   *fri;
+
+    if (uio_resid(uio) == 0) {
+        return (0);
+    }
+
+    fdisp_init(&fdi, 0);
+
+    /* Note that we DO NOT have a UIO_SYSSPACE here (so no need for p2p I/O). */
+
+    while (uio_resid(uio) > 0) {
+
+        fdi.iosize = sizeof(*fri);
+        fdisp_make_vp(&fdi, FUSE_READDIR, vp, td, cred);
+
+        fri = fdi.indata;
+        fri->fh = fufh->fh_id;
+        fri->offset = uio_offset(uio);
+        fri->size = min(uio_resid(uio), FUSE_DEFAULT_IOSIZE); // mp->max_read
+
+        if ((err = fdisp_wait_answ(&fdi))) {
+            goto out;
+        }
+
+        if ((err = fuse_internal_readdir_processdata(uio, fri->size, fdi.answ,
+                                                     fdi.iosize, cookediov))) {
+            break;
+        }
+    }
+
+    fuse_ticket_drop(fdi.tick);
+
+out:
+    return ((err == -1) ? 0 : err);
+}
 
 int
 fuse_internal_readdir_processdata(struct uio *uio,
@@ -276,28 +330,6 @@ fuse_internal_readdir_processdata(struct uio *uio,
                                   size_t bufsize,
                                   void *param)
 {
-    /*
-     * The daemon presents us with a virtual geometry when reading dirents.
-     * This info is stored in the "off" field of fuse_dirent (which is the
-     * struct we can read from her). "off" shows the absolut position of
-     * the next entry (by definition). So I might pull 40 actual bytes from
-     * the daemon, that might count as 60 by her virtual geometry, and when
-     * I translate fuse_dirents to POSIX dirents, I have 20 bytes to pass
-     * to the userspace reader.
-     *	
-     * How to keep these in sync? We don't want to make the general read
-     * routine complex (to which here we serve a background, and which
-     * naively treats reading by a liner logic). So we artifically inflate
-     * dirents: we pad them with as much zeros as we need them to get to
-     * next offset (as the deamon declared), and we pass it to the reader
-     * thusly (this will work as fuse dirents are bigger than std ones). So
-     * we do more IO with the reader than absolutely necessary, but it's
-     * hardly a problem as the expensive thing is reading from the daemon,
-     * not sending data to the reader.
-     *
-     * There is no use to change this simple geometry translation scheme
-     * 'till we do page caching. [We do now, but it's still fine as is.]
-     */
     int err = 0;
     int cou = 0;
     int bytesavail;
@@ -307,32 +339,9 @@ fuse_internal_readdir_processdata(struct uio *uio,
     struct fuse_dirent *fudge;
     struct fuse_iov    *cookediov = param;
     
-    KASSERT(bufsize <= reqsize, ("read more than asked for?"));
-
-    DEBUG2G("starting\n");
-
-    /*
-     * Sanity check: if this fails, we would overrun the allocated space
-     * upon entering the loop below, so we'd better leave right now.
-     * If so, we return -1 to terminate reading.
-     */
     if (bufsize < FUSE_NAME_OFFSET) {
         return (-1);
     }
-
-    DEBUG2G("entering loop with bufsize %d\n", (int)bufsize);
-
-    /*
-     * Can we avoid infite loops? An infinite loop could occur only if we
-     * leave this function with 0 return value, because otherwise we wont't
-     * be called again. But both 0 exit points imply that some data has
-     * been consumed... because
-     *   1) if a turn is not aborted, it consumes positive amount of data
-     *   2) the 0 jump-out from within the loop can't occur in the first
-     *      turn
-     *   3) if we exit 0 after the loop is over, then at least one turn
-     *      was completed, otherwise we hed exited above with -1.
-     */  
 
     for (;;) {
 
@@ -346,15 +355,6 @@ fuse_internal_readdir_processdata(struct uio *uio,
         fudge = (struct fuse_dirent *)buf;
         freclen = FUSE_DIRENT_SIZE(fudge);
 
-        DEBUG("bufsize %d, freclen %d\n", (int)bufsize, (int)freclen);
-
-        /*
-         * Here is an exit condition: we terminate the whole reading
-         * process if a fresh chunk of buffer is already too short to
-         * cut out an entry.
-         * (It it was not the first turn in the loop, nevermind,
-         * return with asking for more)
-         */
         if (bufsize < freclen) {
             err = ((cou == 1) ? -1 : 0);
             break;
@@ -367,25 +367,14 @@ fuse_internal_readdir_processdata(struct uio *uio,
         }
 #endif
 
-        /* Sanity checks */
-
         if (!fudge->namelen || fudge->namelen > MAXNAMLEN) {
-            DEBUG2G("bogus namelen %d at turn %d\n",
-                    fudge->namelen, cou);
             err = EINVAL;
             break;
         }
 
         bytesavail = GENERIC_DIRSIZ((struct pseudo_dirent *)&fudge->namelen); 
 
-        /*
-         * Exit condition 2: if the pretended amount of input is more
-         * than that the userspace wants, then it's time to stop
-         * reading.
-         */  
-        if (bytesavail > uio->uio_resid) {
-            DEBUG2G("leaving at %d-th item as we have %d bytes but only %d is asked for\n",
-                    cou, bytesavail, uio->uio_resid);
+        if (bytesavail > uio_resid(uio)) {
             err = -1;
             break;
         }
@@ -402,10 +391,6 @@ fuse_internal_readdir_processdata(struct uio *uio,
                (char *)buf + FUSE_NAME_OFFSET, fudge->namelen);
         ((char *)cookediov->base)[bytesavail] = '\0';
 
-        DEBUG("bytesavail %d, fudge->off %llu, fudge->namelen %d, uio->uio_offset %d, name %s\n",
-              bytesavail, (unsigned long long)fudge->off, fudge->namelen, (int)uio->uio_offset,
-              (char *)cookediov->base + sizeof(struct dirent) - MAXNAMLEN - 1);
-
         err = uiomove(cookediov->base, cookediov->len, uio);
         if (err) {
             break;
@@ -413,7 +398,7 @@ fuse_internal_readdir_processdata(struct uio *uio,
 
         buf = (char *)buf + freclen;
         bufsize -= freclen;
-        uio->uio_offset = fudge->off;
+        uio_setoffset(uio, fudge->off);
     }
 
     return (err);
@@ -421,6 +406,26 @@ fuse_internal_readdir_processdata(struct uio *uio,
 
 /* remove */
 
+#ifdef XXXIP
+static int
+fuse_unlink_callback(struct vnode *vp, void *cargs)
+{
+    struct vattr *vap;
+    uint64_t target_nlink;
+
+    vap = VTOVA(vp);
+
+    target_nlink = *(uint64_t *)cargs;
+
+    if ((vap->va_nlink == target_nlink) && (vnode_vtype(vp) == VREG)) {
+        fuse_invalidate_attr(vp);
+    }
+
+    return 0;
+}
+#endif
+
+#define INVALIDATE_CACHED_VATTRS_UPON_UNLINK 1
 int
 fuse_internal_remove(struct vnode *dvp,
                      struct vnode *vp,
@@ -428,9 +433,14 @@ fuse_internal_remove(struct vnode *dvp,
                      enum fuse_opcode op)
 {
     struct fuse_dispatcher fdi;
+    struct vattr *vap = VTOVA(vp);
+#if INVALIDATE_CACHED_VATTRS_UPON_UNLINK
+    int need_invalidate = 0;
+    uint64_t target_nlink = 0;
+#endif
     int err = 0;
 
-    debug_printf("dvp=%p, cnp=%p, op=%d, context=%p\n", vp, cnp, op, context);
+    debug_printf("dvp=%p, cnp=%p, op=%d\n", vp, cnp, op);
 
     fdisp_init(&fdi, cnp->cn_namelen + 1);
     fdisp_make_vp(&fdi, op, dvp, curthread, NULL);
@@ -438,12 +448,28 @@ fuse_internal_remove(struct vnode *dvp,
     memcpy(fdi.indata, cnp->cn_nameptr, cnp->cn_namelen);
     ((char *)fdi.indata)[cnp->cn_namelen] = '\0';
 
+#if INVALIDATE_CACHED_VATTRS_UPON_UNLINK
+    if (vap->va_nlink > 1) {
+        need_invalidate = 1;
+        target_nlink = vap->va_nlink;
+    }
+#endif
+
     if (!(err = fdisp_wait_answ(&fdi))) {
         fuse_ticket_drop(fdi.tick);
     }
 
     fuse_invalidate_attr(dvp);
     fuse_invalidate_attr(vp);
+
+#if INVALIDATE_CACHED_VATTRS_UPON_UNLINK
+#ifdef XXXIP
+    if (need_invalidate && !err) {
+        vnode_iterate(vnode_mount(vp), 0, fuse_unlink_callback,
+                      (void *)&target_nlink);
+    }
+#endif
+#endif
 
     return (err);
 }
@@ -511,6 +537,8 @@ fuse_internal_newentry_makerequest(struct mount *mp,
 
     memcpy((char *)fdip->indata + bufsize, cnp->cn_nameptr, cnp->cn_namelen);
     ((char *)fdip->indata)[bufsize + cnp->cn_namelen] = '\0';
+
+    fdip->iosize = bufsize + cnp->cn_namelen + 1;
 }
 
 int
@@ -521,12 +549,9 @@ fuse_internal_newentry_core(struct vnode *dvp,
 {
     int err = 0;
     struct fuse_entry_out *feo;
-    struct mount *mp = dvp->v_mount;
+    struct mount *mp = vnode_mount(dvp);
 
     debug_printf("fdip=%p\n", fdip);
-
-    KASSERT(! (mp->mnt_flag & MNT_RDONLY),
-            ("request for new entry in a read-only mount"));
 
     if ((err = fdisp_wait_answ(fdip))) {
         return (err);
@@ -538,24 +563,13 @@ fuse_internal_newentry_core(struct vnode *dvp,
         goto out;
     }
 
-    /*
-     * The Linux code doesn't seem to make a fuss about
-     * getting a nodeid for a new entry which is  already
-     * in use. Therefore we used to do the same.
-     * This is not possible with our implementation of
-     * atomic create+open; so, even if we could ignore this
-     * fuzz here, we don't do, for the sake of consistency.
-     */
     err = fuse_vget_i(mp, curthread, feo->nodeid, vtyp, vpp,
                       VG_FORCENEW, VTOI(dvp));
-
     if (err) {
-        DEBUG2G("failed to fetch vnode for nodeid\n");
         fuse_internal_forget_send(mp, curthread, NULL, feo->nodeid, 1, fdip);
         return err;
     }
 
-    VTOFUD(*vpp)->nlookup++;
     cache_attrs(*vpp, feo);
 
 out:
@@ -577,7 +591,7 @@ fuse_internal_newentry(struct vnode *dvp,
     struct fuse_dispatcher fdi;
 
     fdisp_init(&fdi, 0);
-    fuse_internal_newentry_makerequest(dvp->v_mount, VTOI(dvp), cnp,
+    fuse_internal_newentry_makerequest(vnode_mount(dvp), VTOI(dvp), cnp,
 	                               op, buf, bufsize, &fdi);
     err = fuse_internal_newentry_core(dvp, vpp, vtyp, &fdi);
     fuse_invalidate_attr(dvp);
@@ -587,51 +601,19 @@ fuse_internal_newentry(struct vnode *dvp,
 
 /* entity destruction */
 
-static void
-fuse_internal_forget_send_pid(struct mount *mp,
-                          pid_t pid,
-                          struct ucred *cred,
-                          uint64_t nodeid,
-                          uint64_t nlookup,
-                          struct fuse_dispatcher *fdip)
-{
-    struct fuse_forget_in *ffi;
-
-    KASSERT(nlookup > 0, ("zero-times forget for vp #%llu",
-            (long long unsigned) nodeid));
-
-    DEBUG("sending FORGET with %llu lookups\n", (unsigned long long)nlookup);
-
-    fdisp_init(fdip, sizeof(*ffi));
-    fdisp_make_pid(fdip, mp, FUSE_FORGET, nodeid, pid, cred);
-
-    ffi = fdip->indata;
-    ffi->nlookup = nlookup;
-
-    fticket_disown(fdip->tick);
-    fuse_insert_message(fdip->tick);
-}
-
 int
-fuse_internal_forget_callback(struct fuse_ticket *tick,
-                              struct uio *uio)
+fuse_internal_forget_callback(struct fuse_ticket *tick, struct uio *uio)
 {
     struct fuse_dispatcher fdi;
-    struct fuse_pidcred *pidcred;
 
-    /*
-     * XXX I think I'm right to send a forget regardless of possible
-     * errors, but...
-     */
+    debug_printf("tick=%p, uio=%p\n", tick, uio);
 
     fdi.tick = tick;
-    pidcred = tick->tk_aw_handler_parm.base;
+    fuse_internal_forget_send(tick->tk_data->mp, curthread, NULL,
+                     ((struct fuse_in_header *)tick->tk_ms_fiov.base)->nodeid,
+                     1, &fdi);
 
-    fuse_internal_forget_send_pid(tick->tk_data->mp, pidcred->pid, &pidcred->cred,
-               ((struct fuse_in_header *)tick->tk_ms_fiov.base)->nodeid,
-               1, &fdi);
-
-    return (0);
+    return 0;
 }
 
 void
@@ -642,9 +624,24 @@ fuse_internal_forget_send(struct mount *mp,
                           uint64_t nlookup,
                           struct fuse_dispatcher *fdip)
 {
-    RECTIFY_TDCR(td, cred);
-    return (fuse_internal_forget_send_pid(mp, td->td_proc->p_pid, cred, nodeid,
-                                   nlookup, fdip));
+    struct fuse_forget_in *ffi;
+
+    debug_printf("mp=%p, nodeid=%llx, nlookup=%lld, fdip=%p\n",
+                 mp, nodeid, nlookup, fdip);
+
+    /*
+     * KASSERT(nlookup > 0, ("zero-times forget for vp #%llu",
+     *         (long long unsigned) nodeid));
+     */
+
+    fdisp_init(fdip, sizeof(*ffi));
+    fdisp_make(fdip, mp, FUSE_FORGET, nodeid, td, cred);
+
+    ffi = fdip->indata;
+    ffi->nlookup = nlookup;
+
+    fticket_invalidate(fdip->tick);
+    fuse_insert_message(fdip->tick);
 }
 
 /* fuse start/stop */
@@ -654,11 +651,7 @@ fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
 {
     int err = 0;
     struct fuse_data     *data = tick->tk_data;
-#if FUSE_KERNELABI_GEQ(7, 5)
     struct fuse_init_out *fiio;
-#else
-    struct fuse_init_in_out *fiio;
-#endif
 
     if ((err = tick->tk_aw_ohead.error)) {
         goto out;
@@ -670,9 +663,9 @@ fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
 
     fiio = fticket_resp(tick)->base;
 
-    /* XXX is the following check adequate? */
+    /* XXX: Do we want to check anything further besides this? */
     if (fiio->major < 7) {
-        DEBUG2G("userpace version too low\n");
+        debug_printf("userpace version too low\n");
         err = EPROTONOSUPPORT;
         goto out;
     }
@@ -680,14 +673,12 @@ fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
     data->fuse_libabi_major = fiio->major;
     data->fuse_libabi_minor = fiio->minor;
 
-    if (FUSE_KERNELABI_GEQ(7, 5) && fuse_libabi_geq(data, 7, 5)) {
-#if FUSE_KERNELABI_GEQ(7, 5)
+    if (fuse_libabi_geq(data, 7, 5)) {
         if (fticket_resp(tick)->len == sizeof(struct fuse_init_out)) {
             data->max_write = fiio->max_write;
         } else {
             err = EINVAL;
         }
-#endif
     } else {
         /* Old fix values */
         data->max_write = 4096;
@@ -711,11 +702,7 @@ out:
 void
 fuse_internal_send_init(struct fuse_data *data, struct thread *td)
 {
-#if FUSE_KERNELABI_GEQ(7, 5)
     struct fuse_init_in   *fiii;
-#else
-    struct fuse_init_in_out *fiii;
-#endif
     struct fuse_dispatcher fdi;
 
     fdisp_init(&fdi, sizeof(*fiii));
@@ -723,6 +710,8 @@ fuse_internal_send_init(struct fuse_data *data, struct thread *td)
     fiii = fdi.indata;
     fiii->major = FUSE_KERNEL_VERSION;
     fiii->minor = FUSE_KERNEL_MINOR_VERSION;
+    fiii->max_readahead = FUSE_DEFAULT_IOSIZE * 16;
+    fiii->flags = 0;
 
     fuse_insert_callback(fdi.tick, fuse_internal_init_callback);
     fuse_insert_message(fdi.tick);

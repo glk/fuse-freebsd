@@ -46,6 +46,7 @@
 
 #include <sys/priv.h>
 
+#if 0
 /* function prototype for iterators over filehandles (of a vp) */
 typedef int fuse_metrics_t(struct fuse_filehandle *fufh, struct thread *td,
                            struct ucred *cred, void *param);
@@ -312,26 +313,7 @@ fuse_vnode_teardown(struct vnode *vp, struct thread *td, struct ucred *cred,
 
 	vput(vp);
 }
-
-static int
-fuse_file_ditch(struct fuse_filehandle *fufh, struct thread *td,
-                struct ucred *cred, void *param)
-{
-	if (fufh->fp) {
-		fufh->fp->f_ops = &vnops;
-		fufh->fp->f_data = NULL;
-		fufh->fp = NULL;
-	}
-	fufh->useco = 0;
-
-	return (0);
-}
-
-/******************
- *
- * >>> Vnode ops and their helpers
- *
- ******************/
+#endif
 
 /*
     struct vnop_access_args {
@@ -354,16 +336,22 @@ fuse_vnop_access(struct vop_access_args *ap)
 
     fuse_trace_printf_vnop();
 
+    if (fuse_isdeadfs(vp)) {
+        if (vnode_isvroot(vp)) {
+            return 0;
+        }
+        return EBADF;
+    }
+
     bzero(&facp, sizeof(facp));
 
     if (fvdat->flags & FVP_ACCESS_NOOP) {
-            fvdat->flags &= ~FVP_ACCESS_NOOP;
+        fvdat->flags &= ~FVP_ACCESS_NOOP;
     } else {
-            facp.facc_flags |= FACCESS_DO_ACCESS;
-    }
+        facp.facc_flags |= FACCESS_DO_ACCESS;
+    }   
 
-    return fuse_internal_access(vp, ap->a_accmode,
-        ap->a_cred, ap->a_td, &facp);
+    return fuse_internal_access(vp, ap->a_accmode, ap->a_cred, ap->a_td, &facp);
 }
 
 /*
@@ -377,20 +365,36 @@ fuse_vnop_access(struct vop_access_args *ap)
 static int
 fuse_vnop_close(struct vop_close_args *ap)
 {
-    struct fuse_release_param frp;
+    struct vnode *vp = ap->a_vp;
+    fufh_type_t             fufh_type;
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    struct fuse_filehandle *fufh = NULL;
 
-    DEBUG2G("vnode #%llu\n", VTOILLU(ap->a_vp));
-    frp.err = 0;
-#if FUSE_HAS_FLUSH_RELEASE
-    frp.fg = 1;
-    frp.flush = 1;
-#else
-    frp.fg = 0;
-    frp.flush = 0;
-#endif
-    fuse_filehandle_gc(ap->a_vp, ap->a_td, ap->a_cred, &frp);
+    fuse_trace_printf_vnop();
 
-    return (frp.err);
+    if (fuse_isdeadfs_nop(vp)) {
+        return 0;
+    }
+
+    if (vnode_vtype(vp) == VDIR) {
+        fufh_type = FUFH_RDONLY;
+    } else {
+        fufh_type = fuse_filehandle_xlate_from_fflags(ap->a_fflag);
+    }
+
+    fufh = &(fvdat->fufh[fufh_type]);
+
+    if (!(fufh->fufh_flags & FUFH_VALID)) {
+        panic("fufh type %d found to be invalid in close\n", fufh_type);
+    }
+
+    fufh->open_count--;
+
+    if ((fufh->open_count == 0) && !(fufh->fufh_flags & FUFH_MAPPED)) {
+        (void)fuse_filehandle_put(vp, NULL, NULL, fufh_type, 0);
+    }
+
+    return 0;
 }
 
 /*
@@ -406,55 +410,145 @@ fuse_vnop_create(struct vop_create_args *ap)
 {
     struct vnode *dvp = ap->a_dvp;
     struct vnode **vpp = ap->a_vpp;
+    struct componentname *cnp = ap->a_cnp;
     struct vattr *vap = ap->a_vap;
-#if FUSE_HAS_CREATE
-    struct fuse_vnode_data *fvdat;
+    struct thread *td = cnp->cn_thread;
+    struct ucred *cred = cnp->cn_cred;
+
+    struct fuse_dispatcher  fdi;
+    struct fuse_dispatcher *fdip = &fdi;
+    struct fuse_entry_out  *feo;
+    struct fuse_mknod_in    fmni;
+    struct fuse_open_in    *foi;
+
     int err;
+    int gone_good_old = 0;
 
-    if (vap->va_type != VREG ||
-        fusefs_get_data(dvp->v_mount)->dataflag & FSESS_NOCREATE)
-            goto good_old;
+    struct mount *mp = vnode_mount(dvp);
+    uint64_t parentnid = VTOFUD(dvp)->nid;
+    mode_t mode = MAKEIMODE(vap->va_type, vap->va_mode);
 
-    /*
-     * We cobble together here a new vnode as the caller expects that,
-     * but we don't yet fully initialize it (that will happen when it
-     * will be opened). We keep it in a "germic" state.
-     */
-    if ((err = getnewvnode("fuse", dvp->v_mount, &fuse_vnops, vpp)))
-            return (err);
+    fuse_trace_printf_vnop();
 
-    if ((err = vn_lock(*vpp, LK_EXCLUSIVE | LK_RETRY))) {
-            printf("fuse4bsd: leaking vnode %p\n", *vpp);
-            return (err);
+    if (fuse_isdeadfs_nop(dvp)) {
+        panic("fuse_vnop_create(): called on a dead file system");
     }
 
-    fvdat = malloc(sizeof(*fvdat), M_FUSEVN, M_WAITOK | M_ZERO);
+    bzero(&fdi, sizeof(fdi));
 
-    fvdat->parent_nid = VTOI(dvp);
-    /*
-     * We overload some fields of the vnode data to carry the information
-     * which will be needed to make the proper CREATE query in open.
-     * germcnp is a dedicated field for this purpose though.
-     */
-    fvdat->flags = MAKEIMODE(vap->va_type, vap->va_mode);
-    fvdat->germcnp = ap->a_cnp;
+    // XXX: Will we ever want devices?
+    if ((vap->va_type != VREG) ||
+        fusefs_get_data(mp)->dataflag & FSESS_NOCREATE) {
+        goto good_old;
+    }
 
-    /*
-     * Stub vnops, almost the same as "dead", with the exception of the
-     * critical ones which will let the vnode get fully emerged.
-     */
-    (*vpp)->v_op = &fuse_germ_vnops;
-    (*vpp)->v_data = fvdat;
-    (*vpp)->v_mount = dvp->v_mount;
+    debug_printf("parent nid = %llu, mode = %x\n", parentnid, mode);
 
-    fuse_invalidate_attr(dvp);
+    fdisp_init(fdip, sizeof(*foi) + cnp->cn_namelen + 1);
+    if (fusefs_get_data(vnode_mount(dvp))->dataflag & FSESS_NOCREATE) {
+        debug_printf("eh, daemon doesn't implement create?\n");
+        goto good_old;
+    }
+
+    fdisp_make(fdip, vnode_mount(dvp), FUSE_CREATE, parentnid, td, cred);
+
+    foi = fdip->indata;
+    foi->mode = mode;
+    foi->flags = O_RDWR; // XXX: We /always/ creat() like this.
+
+    memcpy((char *)fdip->indata + sizeof(*foi), cnp->cn_nameptr,
+           cnp->cn_namelen);
+    ((char *)fdip->indata)[sizeof(*foi) + cnp->cn_namelen] = '\0';
+
+    err = fdisp_wait_answ(fdip);
+
+    if (err == ENOSYS) {
+        debug_printf("create: got ENOSYS from daemon\n");
+        fusefs_get_data(vnode_mount(dvp))->dataflag |= FSESS_NOCREATE;
+        fdip->tick = NULL;
+        goto good_old;
+    } else if (err) {
+        debug_printf("create: darn, got err=%d from daemon\n", err);
+        goto undo;
+    }
+
+    goto bringup;
+
+good_old:
+    gone_good_old = 1;
+    fmni.mode = mode; /* fvdat->flags; */
+    fmni.rdev = 0;
+    fuse_internal_newentry_makerequest(vnode_mount(dvp), parentnid, cnp,
+                                       FUSE_MKNOD, &fmni, sizeof(fmni),
+                                       fdip);
+    err = fdisp_wait_answ(fdip);
+    if (err) {
+        goto undo;
+    }
+
+bringup:
+    feo = fdip->answ;
+
+    if ((err = fuse_internal_checkentry(feo, VREG))) {
+        fuse_ticket_drop(fdip->tick);
+        goto undo;
+    }
+
+    err = FSNodeGetOrCreateFileVNodeByID(mp,
+                                         feo->nodeid,
+                                         dvp,
+                                         VREG, /*size*/0,
+                                         vpp,
+                                         (gone_good_old) ? 0 : FN_CREATING);
+    if (err) {
+       if (gone_good_old) {
+           fuse_internal_forget_send(mp, td, cred, feo->nodeid, 1, fdip);
+       } else {
+           struct fuse_release_in *fri;
+           uint64_t nodeid = feo->nodeid;
+           uint64_t fh_id = ((struct fuse_open_out *)(feo + 1))->fh;
+
+           fdisp_init(fdip, sizeof(*fri));
+           fdisp_make(fdip, mp, FUSE_RELEASE, nodeid, td, cred);
+           fri = fdip->indata;
+           fri->fh = fh_id;
+           fri->flags = OFLAGS(mode);
+           fuse_insert_callback(fdip->tick, fuse_internal_forget_callback);
+           fuse_insert_message(fdip->tick);
+       }
+       return err;
+    }
+
+    fdip->answ = gone_good_old ? NULL : feo + 1;
+
+    if (!gone_good_old) {
+        uint64_t x_fh_id = ((struct fuse_open_out *)(feo + 1))->fh;
+        uint32_t x_open_flags = ((struct fuse_open_out *)(feo + 1))->open_flags;
+        struct fuse_vnode_data *fvdat = VTOFUD(*vpp);
+        struct fuse_filehandle *fufh = &(fvdat->fufh[FUFH_RDWR]);
+
+        fufh->fh_id = x_fh_id;
+        fufh->open_flags = x_open_flags;
+
+#if 0
+        struct fuse_dispatcher x_fdi;
+        struct fuse_release_in *x_fri;
+        fdisp_init(&x_fdi, sizeof(*x_fri));
+        fdisp_make_vp(&x_fdi, FUSE_RELEASE, *vpp, context);
+        x_fri = x_fdi.indata;
+        x_fri->fh = x_fh_id;
+        x_fri->flags = O_WRONLY;
+        fuse_insert_callback(x_fdi.tick, NULL);
+        fuse_insert_message(x_fdi.tick);
+#endif
+    }
+
+    cache_enter(dvp, *vpp, cnp);
 
     return (0);
 
-good_old:
-#endif
-    vap->va_rdev = 0;
-    return (VOP_MKNOD(dvp, vpp, ap->a_cnp, vap));
+undo:
+    return (err);
 }
 
 /*
@@ -484,84 +578,50 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
     struct vnode *vp = ap->a_vp;
     struct thread *td = ap->a_td;
     struct fuse_dispatcher fdi;
-
+    struct fuse_filehandle *fufh;
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    int type;
+#if 0
     int err = 0;
+    int waitfor = ap->a_waitfor;
+    struct timeval tv;
+    int wait = (waitfor == MNT_WAIT);
+#endif
+    fuse_trace_printf_vnop();
 
-    DEBUG("got flag %d\n", ap->a_waitfor);
+    if (fuse_isdeadfs_nop(vp)) {
+        return 0;
+    }
 
-    /*
-     * Usually, the call to vop_stdfsync is expected to do nothing, as we
-     * tend to leave no dirty buffers behind. However, they might show up,
-     * eg., after an interrupted write.
-     * To be able to release the kernel's cleanup-dirty-buffers machinery
-     * this is advised to be inserted here.
-     */
+    cluster_push(vp, 0);
 
-    if ((err = vop_stdfsync(ap)))
-        return (err); 
+#if 0
+    buf_flushdirtyblks(vp, wait, 0, (char *)"fuse_fsync");
+    microtime(&tv);
+#endif
 
-    /*	
-     * In Linux, the fsync syscall handler is file based.
-     * Hence in fuse too -- and this approach does make sense,
-     * for exapmle, when it comes to implementing things like
-     * sshfs: the sshfs userspace fsync handler flushes data
-     * associated with the given filehandle, ie. sftp
-     * messaging thread.
-     * 
-     * On the other hand, BSD fsync is inherently not file
-     * but vnode based: even fsync(2), to which one passes
-     * a file descriptor, the corresponding file is used for 
-     * nothing but looking up the vnode behind (see fsync() 
-     * in kern/vfs_syscalls.c).
-     *
-     * We have thus two choices here: either grab the first
-     * open file and use that for the fsync message or run
-     * through all files (at least, the ones we have acces to,
-     * ie., those belonging to the current process). The first
-     * is bad: as we mentioned concerning sshfs, dirty data can belong
-     * to each ssh messaging thread, being associated to file
-     * handles independently. 
-     *
-     * So we wanna sync all our open files. "Nowait" sync is easy,
-     * just walk over all the files, and send FUSE_FSYNC(DIR) with
-     * a null callback, and leave. "Wait" sync is harder: syncing
-     * the files linearly, one after the other would be very easy
-     * indeed but would be far more than a lethal dose of the KISS
-     * principle. So sending of the messages and waiting for them
-     * should be done synchronously. The messaging backend is flexible
-     * enough for making the implementation of this not too hard, 
-     * but now I don't wanna go mucking with the proper handling of
-     * interrupts, and other issues; and I don't wanna break the nice
-     * hi-level messaging API which serves us well otherwise. So
-     * currently I just say no here...
-     *
-     * Just to note: even the "nowait" type fsync could be optimized
-     * if we went beyond the api, and lock/unlock all mutexes (tickets',
-     * messages', callbacks') only once, and take out/put in stuff for all
-     * files together, with one big breath. But doing not so is not as much
-     * overhead as it would be worth for the trouble.
-     */
+    // vnode and ubc are in lock-step.
+    // can call vnode_isinuse().
+    // can call ubc_sync_range().
 
-    /*
-     * It seemed to be a good idea to lock the filehandle lock only before
-     * doing iterate_filehandle but that configuration is suspected to cause
-     * LOR alerts, so now we get the filehandle lock before the fuse_data
-     * lock.
-     */
-    ASSERT_VOP_LOCKED__FH(vp);
-
-    if (fusefs_get_data(vp->v_mount)->dataflag &
-        (vp->v_type == VDIR ? FSESS_NOFSYNCDIR : FSESS_NOFSYNC)) {
+    if (!(fusefs_get_data(vnode_mount(vp))->dataflag &
+        (vnode_vtype(vp) == VDIR ? FSESS_NOFSYNCDIR : FSESS_NOFSYNC))) {
         goto out;
     }
 
     fdisp_init(&fdi, 0);
-    iterate_filehandles(vp, td, NULL, fuse_fsync_filehandle, &fdi);
+    for (type = 0; type < FUFH_MAXTYPE; type++) {
+        fufh = &(fvdat->fufh[type]);
+        if (fufh->fufh_flags & FUFH_VALID) {
+            fuse_internal_fsync(vp, td, NULL, fufh, &fdi);
+        }
+    }
 
 out:
-    return (err);
+    return 0;
 }
 
+#ifdef XXXVP
 /*
     struct vnop_getattr_args {
 	struct vnode *a_vp;
@@ -637,11 +697,12 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
 	return (0);
 
 fake:
-	bzero(vap, sizeof(*vap));
-	vap->va_type = vp->v_type;
+    bzero(vap, sizeof(*vap));
+    vap->va_type = vnode_vtype(vp);
 
-	return (0);
+    return (0);
 }
+#endif
 
 /*
     struct vnop_inactive_args {
@@ -652,64 +713,24 @@ fake:
 static int
 fuse_vnop_inactive(struct vop_inactive_args *ap)
 {
-	struct vnode *vp = ap->a_vp;	
-	struct thread *td = ap->a_td;
+    struct vnode *vp = ap->a_vp;	
+    struct thread *td = ap->a_td;
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    struct fuse_filehandle *fufh = NULL;
+    int type;
 
-	int err;
+    fuse_trace_printf_vnop();
 
-	DEBUG("getting at vnode of ino %llu\n", VTOILLU(vp));
-#if _DEBUG
-	DEBUG2G("=============>\n");
-	kdb_backtrace();
-	vn_printf(vp, " ");
-	DEBUG2G("<=============\n");
-#endif
+    for (type = 0; type < FUFH_MAXTYPE; type++) {
+        fufh = &(fvdat->fufh[type]);
+        if (fufh->fufh_flags & FUFH_VALID) {
+            fufh->fufh_flags &= ~FUFH_MAPPED;
+            fufh->open_count = 0;
+            (void)fuse_filehandle_put(vp, td, NULL, type, 0);
+        }
+    }
 
-	{
-		struct fuse_release_param frp;
-
-		frp.fg = 0;
-		frp.flush = 0;
-		fuse_filehandle_gc(vp, td, NULL, &frp);
-	}
-
-#ifndef DONT_STORE_FS_MAP
-	/*
-	 * Dropping vnodes when they are not in use would mean that
-	 * the respective inode must be freed on the daemon's side
-	 * (this is ia necessity according to the protocol: if
-	 * we drop the vnode, then we lose the associated nlookup
-	 * value, which is required to be kept during the lifetime of
-	 * the inode, as at the end of the inode's lifetime this info
-	 * is required for properly killing it (cf. forget_node() of 
-	 * lib/fuse.c and the assertion in it), that is, the inode
-	 * can't be kept alive further than the vnode).
-	 *
-	 * So either we aggressively kill both kind of beasts and don't
-	 * store permanently a "map" of the fs (thus, eg, same files
-	 * pop up with different inode numbers upon different lookups, 
-	 * which is weird), or we keep them both and don't do anything when 
-	 * the vnode usecount falls to zero (ie. use a peaceful vop_inactive
-	 * which throws away only rotten vegetables).
-	 *
-	 * The latter approach seems to be the better, partly because of
-	 * the above mentioned weirdness, but mostly because fs ops done
-	 * by the daemon are considered expensive.
-	 * 
-	 * [To add, all this reasoning doesn't imply I understand the 
-	 * reason for the enforcement of the thigt synchronization
-	 * between in-kernel vnodes and userspace inodes.]
-	 */
-	if (VTOFUD(vp))
-		return (0);
-#endif
-
-	if ((err = fuse_recyc_backend(vp, td)))
-		return err;
-
-	vrecycle(vp, td);
-
-	return (0);
+    return 0;
 }
 
 /*
@@ -733,22 +754,18 @@ fuse_vnop_link(struct vop_link_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (tdvp->v_mount != vp->v_mount) {
-            return (EXDEV);
+    if (fuse_isdeadfs_nop(vp)) {
+        panic("fuse_vnop_link(): called on a dead file system");
+    }
+
+    if (vnode_mount(tdvp) != vnode_mount(vp)) {
+        return (EXDEV);
     }
 
     fli.oldnodeid = VTOI(vp);
 
-    /*
-     * Unlike Linux, we proceed here lazily: here we do nothing on
-     * the kernel side for registering the new, hardlinked entry.
-     * (That will just happen when the hardlinked entry is looked up
-     * first time). We just send the request to the daemon.
-     * This suits better for the BSD VFS.
-     */
-
     fdisp_init(&fdi, 0);
-    fuse_internal_newentry_makerequest(tdvp->v_mount, VTOI(tdvp), cnp,
+    fuse_internal_newentry_makerequest(vnode_mount(tdvp), VTOI(tdvp), cnp,
                                        FUSE_LINK, &fli, sizeof(fli), &fdi);
     if ((err = fdisp_wait_answ(&fdi))) {
         return (err);
@@ -756,26 +773,10 @@ fuse_vnop_link(struct vop_link_args *ap)
 
     feo = fdi.answ;
 
-    err = fuse_internal_checkentry(feo, vp->v_type);
-
+    err = fuse_internal_checkentry(feo, vnode_vtype(vp));
     fuse_ticket_drop(fdi.tick);
     fuse_invalidate_attr(tdvp);
-    /*
-     * It depends on userspace if the hardlinked entry is really the
-     * same vnode or not. Sort of unconventionally, the latter happens
-     * if linking is managed by the hi-level FUSE library (in which case
-     * syncing between the two nodes is up to the actual fs code).
-     * Therefore we can't just cache the attrs we got for the hardlink node,
-     * -- that regards to the hardlinked node and not the original.
-     * What we do instead is invalidating cached attrs of the original so
-     * the fs gets a chance to pass on updated attributes also for the
-     * original node.
-     *
-     * See also remark at the similar place in the Linux kernel code.
-     */
     fuse_invalidate_attr(vp);
-
-    VTOFUD(vp)->nlookup++;
 
     return (err);
 }
@@ -788,6 +789,7 @@ fuse_vnop_link(struct vop_link_args *ap)
 	struct componentname *a_cnp;
     };
 */
+#ifdef XXXIP
 int
 fuse_vnop_lookup(struct vop_lookup_args *ap)
 {
@@ -1192,19 +1194,9 @@ out:
         fuse_ticket_drop(fdi.tick);
     }
 
-    DEBUG("returning with %d\n", err);
-#if _DEBUG2G
-    if (!err) {
-        DEBUG2G("looked up node:\n");
-        vn_printf(*vpp, " * ");
-    }
-#endif
-#if _DEBUG
-    DEBUG2G("root node:\n");
-    vn_printf(fusefs_get_data(dvp->v_mount)->rvp, " * ");
-#endif
     return (err);
 }
+#endif
 
 
 /*
@@ -1226,6 +1218,10 @@ fuse_vnop_mkdir(struct vop_mkdir_args *ap)
     struct fuse_mkdir_in fmdi; 
 
     fuse_trace_printf_vnop();
+
+    if (fuse_isdeadfs_nop(dvp)) {
+        panic("fuse_vnop_mkdir(): called on a dead file system");
+    }
 
     fmdi.mode = MAKEIMODE(vap->va_type, vap->va_mode);
 
@@ -1253,12 +1249,17 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
 
     fuse_trace_printf_vnop();
 
+    if (fuse_isdeadfs_nop(dvp)) {
+        panic("fuse_vnop_mknod(): called on a dead file system");
+    }
+
     fmni.mode = MAKEIMODE(vap->va_type, vap->va_mode);
     fmni.rdev = vap->va_rdev;
 
     return fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKNOD, &fmni,
                                  sizeof(fmni), vap->va_type);
 }
+
 
 /*
     struct vnop_open_args {
@@ -1275,82 +1276,121 @@ fuse_vnop_open(struct vop_open_args *ap)
     struct vnode *vp = ap->a_vp;
     struct thread *td = ap->a_td;
     struct ucred *cred = ap->a_cred;
-    int mode = ap->a_mode;
-
+    fufh_type_t             fufh_type;
+    struct fuse_vnode_data *fvdat;
     struct fuse_filehandle *fufh = NULL;
-    struct file *fp = ap->a_fp;
-    struct get_filehandle_param gefhp;
+    struct fuse_filehandle *fufh_rw = NULL;
 
-    int err = 0;
+    int error, isdir = 0, mode, oflags;
 
-    /*
-     * Contrary to that how it used to be, now we go on even if it's an
-     * internal (fileless) open: to match the "specs", we must get the
-     * keep_cache information (and act according to it).
-     */
+    fuse_trace_printf_vnop();
 
-#if _DEBUG2G
-    if (fp)
-            DEBUG2G("fp->f_flag %#x, open mode %d\n", fp->f_flag, mode);
-#endif
-
-    bzero(&gefhp, sizeof(gefhp));
-    gefhp.do_gc = 1;
-    gefhp.do_new = 1;
-    gefhp.opcode = (vp->v_type == VDIR) ? FUSE_OPENDIR : FUSE_OPEN;
-    if ((err = fuse_get_filehandle(vp, td, cred, mode, &fufh, &gefhp)))
-            goto out;
-
-    /*
-     * Types: VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD 
-     * XXX: should we let the fs take over spec files or let the OS
-     *  directly handle their IO?
-     */
-    /* This is neither got right, nor settled */
-#if 0
-            if (! (vp->v_type == VFIFO || vp->v_type == VSOCK))
-                    fp->f_ops = &fuse_fileops;
-#endif
-
-    if (! (fufh->flags & FOPEN_KEEP_CACHE)) {
-            DEBUG2G("flushing cache\n");
-            /*
-             * This is a bit more heavyweight than the analogous function
-             * used in Linux at this point (in their sys/mm/truncate.c,
-             * the description says:
-             * "invalidate_mapping_pages() will not block on IO activity.
-             * It will not invalidate pages which are dirty, locked, under
-             * writeback or mapped into pagetables.") 
-             */
-            err = vinvalbuf(vp, 0, PCATCH, 0);
-            fufh->flags |= FOPEN_KEEP_CACHE;
+    if (fuse_isdeadfs(vp)) {
+        return ENXIO;
     }
 
-    if (! vp->v_object && /* just to avoid needless getattr'ing */
-        ! (err = vnode_create_vobject(vp, 0, td)) &&
+    mode    = ap->a_mode;
+    fvdat   = VTOFUD(vp);
+    if (vnode_vtype(vp) == VDIR) {
+        isdir = 1;
+    }
+
+    if (isdir) {
+        fufh_type = FUFH_RDONLY;
+    } else {
+        debug_printf("fuse_open(VREG)\n");
+        fufh_type = fuse_filehandle_xlate_from_fflags(mode);
+    }
+
+    oflags = fuse_filehandle_xlate_to_oflags(fufh_type);
+
+    fufh = &(fvdat->fufh[fufh_type]);
+
+    if (!isdir && (fvdat->flag & FN_CREATING)) {
+
+        mtx_lock(&fvdat->createlock);
+
+        if (fvdat->flag & FN_CREATING) { // check again
+            if (fvdat->creator == curthread) {
+
+                /*
+                 * For testing the race condition we want to prevent here,
+                 * try something like the following:
+                 *
+                 *     int dummyctr = 0;
+                 *
+                 *     for (; dummyctr < 2048000000; dummyctr++);
+                 */
+
+                fufh_rw = &(fvdat->fufh[FUFH_RDWR]);
+
+                fufh->fufh_flags |= FUFH_VALID;
+                fufh->fufh_flags &= ~FUFH_MAPPED;
+                fufh->open_count = 1;
+                fufh->open_flags = oflags;
+                fufh->type = fufh_type;
+
+                fufh->fh_id = fufh_rw->fh_id;
+                fufh->open_flags = fufh_rw->open_flags;
+                debug_printf("creator picked up stashed handle, moved to %d\n",
+                             fufh_type);
+                
+                fvdat->flag &= ~FN_CREATING;
+
+                mtx_unlock(&fvdat->createlock);
+                wakeup((caddr_t)fvdat->creator); // wake up all
+                goto ok; /* return 0 */
+            } else {
+                printf("contender going to sleep\n");
+                error = msleep(fvdat->creator, &fvdat->createlock,
+                               PDROP | PINOD | PCATCH, "fuse_open", 0);
+                /*
+                 * msleep will drop the mutex. since we have PDROP specified,
+                 * it will NOT regrab the mutex when it returns.
+                 */
+                debug_printf("contender awake (error = %d)\n", error);
+
+                if (error) {
+                    /*
+                     * Since we specified PCATCH above, we'll be woken up in
+                     * case a signal arrives. The value of error could be
+                     * EINTR or ERESTART.
+                     */
+                    return error;
+                }
+            }
+        } else {
+            mtx_unlock(&fvdat->createlock);
+            /* Can proceed from here. */
+        }
+    }
+
+    if (fufh->fufh_flags & FUFH_VALID) {
+        fufh->open_count++;
+        goto ok; /* return 0 */
+    }
+
+    error = fuse_filehandle_get(vp, td, cred, fufh_type);
+    if (error) {
+        return error;
+    }
+
+ok:
+    {
         /*
-         * Duh, we have to check the result by ourselfves,
-         * vnode_create_vobject swallows errors
+         * Doing this here because when a vnode goes inactive, no-cache and
+         * no-readahead are cleared by the kernel.
          */
-        ! vp->v_object)
-            err = ENODEV;
+        int dataflag = fusefs_get_data(vnode_mount(vp))->dataflag;
+        if (dataflag & FSESS_NO_READAHEAD) {
+            vnode_setnoreadahead(vp);
+        }
+        if (dataflag & FSESS_NO_UBC) {
+            vnode_setnocache(vp);
+        }
+    }
 
-    if (fp && ! err) {
-            fp->f_ops = &fuse_fileops;
-            fufh->fp = fp;
-            fp->f_data = fufh;
-    } else
-            fufh->useco--;
-
-out:
-    if (VTOFUD(vp))
-            /*
-             * If vnode was to be created, but FUSE_CREATE/FUSE_MKNOD
-             * has failed, vp will have no private data.
-             * It seems to be fine to handle that here.
-             */
-            VTOFUD(vp)->flags &= ~FVP_ACCESS_NOOP;
-    return (err);
+    return 0;
 }
 
 /*

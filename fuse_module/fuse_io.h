@@ -41,8 +41,7 @@ _file_is_bad(struct file *fp)
                 fp->f_vnode->v_type == VBAD ||
                 fp->f_vnode->v_op == &dead_vnodeops ||
                 fp->f_vnode->v_data == NULL ||
-                fp->f_data == NULL ||
-                FTOFH(fp)->fh_vp->v_type == VBAD);
+                fp->f_data == NULL);
 }
 
 /*

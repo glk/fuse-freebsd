@@ -51,25 +51,25 @@ uio_setoffset(struct uio *uio, off_t offset)
 }
 
 /* XXX */
+void cluster_push(struct vnode *vp, int a);
+
 struct fuse_pidcred {
-	pid_t pid;
-	struct ucred cred;
+    pid_t pid;
+    struct ucred cred;
 };
 
 /* access */
 
-#define FACCESS_VA_VALID   0x01 /* flag to sign to reuse cached attributes
-                                   regardless of cache timeout */
-#define FACCESS_DO_ACCESS  0x02 /* flag showing if we are to do access check */
-#define FACCESS_STICKY     0x04 /* do sticky dir permission check */
-#define FACCESS_CHOWN      0x08 /* do permission check for owner changing */
-#define FACCESS_NOCHECKSPY 0x10 /* don't check if daemon is allowed to spy on
-                                   user */
-#define FACCESS_SETGID     0x12 /* do permission check for setting setgid flag */
+#define FVP_ACCESS_NOOP   0x01
+
+#define FACCESS_VA_VALID   0x01
+#define FACCESS_DO_ACCESS  0x02
+#define FACCESS_STICKY     0x04
+#define FACCESS_CHOWN      0x08
+#define FACCESS_NOCHECKSPY 0x10
+#define FACCESS_SETGID     0x12
 
 #define FACCESS_XQUERIES FACCESS_STICKY | FACCESS_CHOWN | FACCESS_SETGID
-
-#define FVP_ACCESS_NOOP   0x01 /* vnode based control flag for doing access check */
 
 struct fuse_access_param {
     uid_t xuid;
@@ -142,10 +142,17 @@ fuse_internal_attr_fat2vat(struct mount *mp,
                                                                                \
     timespecadd(&VTOFUD(vp)->cached_attrs_valid, &uptsp_ ## __func__);         \
                                                                                \
-    fuse_internal_attr_fat2vat((vp)->v_mount, &(fuse_out)->attr, VTOVA(vp));   \
+    fuse_internal_attr_fat2vat(vnode_mount(vp), &(fuse_out)->attr, VTOVA(vp)); \
 } while (0)
 
 /* fsync */
+
+int
+fuse_internal_fsync(struct vnode           *vp,
+                    struct thread          *td,
+                    struct ucred           *cred,
+                    struct fuse_filehandle *fufh,
+                    void                   *param);
 
 int
 fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio);
@@ -155,6 +162,14 @@ fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio);
 struct pseudo_dirent {
     uint32_t d_namlen;
 };
+
+int
+fuse_internal_readdir(struct vnode           *vp,
+                      struct uio             *uio,
+                      struct thread          *td,
+                      struct ucred           *cred,
+                      struct fuse_filehandle *fufh,
+                      struct fuse_iov        *cookediov);
 
 int
 fuse_internal_readdir_processdata(struct uio *uio,
@@ -251,5 +266,28 @@ fuse_internal_forget_send(struct mount *mp,
 
 int fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio);
 void fuse_internal_send_init(struct fuse_data *data, struct thread *td);
+
+/* miscellaneous */
+
+#define fuse_isdeadfs_nop(vp) 0
+
+static __inline__
+int
+fuse_isdeadfs(struct vnode *vp)
+{
+    struct mount *mp = vnode_mount(vp);
+    struct fuse_data *data = fusefs_get_data(mp);
+
+    return (data->dataflag & FSESS_KICK);
+}
+
+static __inline__
+int
+fuse_isdeadfs_mp(struct mount *mp)
+{
+    struct fuse_data *data = fusefs_get_data(mp);
+
+    return (data->dataflag & FSESS_KICK);
+}
 
 #endif /* _FUSE_INTERNAL_H_ */
