@@ -14,10 +14,22 @@
 #include "fuse_ipc.h"
 #include "fuse_node.h"
 
+static __inline int
+vfs_isrdonly(struct mount *mp)
+{
+    return ((mp->mnt_flag & MNT_RDONLY) != 0 ? 1 : 0);
+}
+
 static __inline struct mount *
 vnode_mount(struct vnode *vp)
 {
 	return (vp->v_mount);
+}
+
+static __inline int
+vnode_mountedhere(struct vnode *vp)
+{
+	return (vp->v_mountedhere != NULL ? 1 : 0);
 }
 
 static __inline enum vtype
@@ -30,6 +42,18 @@ static __inline int
 vnode_isvroot(struct vnode *vp)
 {
     return ((vp->v_vflag & VV_ROOT) != 0 ? 1 : 0);
+}
+
+static __inline int
+vnode_isreg(struct vnode *vp)
+{
+    return (vp->v_type == VREG ? 1 : 0);
+}
+
+static __inline int
+vnode_isdir(struct vnode *vp)
+{
+    return (vp->v_type == VDIR ? 1 : 0);
 }
 
 static __inline ssize_t
@@ -48,6 +72,12 @@ static __inline void
 uio_setoffset(struct uio *uio, off_t offset)
 {
     uio->uio_offset = offset;
+}
+
+static __inline void
+uio_setresid(struct uio *uio, ssize_t resid)
+{
+    uio->uio_resid = resid;
 }
 
 /* XXX */
