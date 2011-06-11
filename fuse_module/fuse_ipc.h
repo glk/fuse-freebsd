@@ -302,14 +302,12 @@ fdisp_simple_putget_vp(struct fuse_dispatcher *fdip, enum fuse_opcode op,
     return (fdisp_wait_answ(fdip));
 }
 
-static __inline__ int
-fdisp_simple_vfs_getattr(struct fuse_dispatcher *fdip,
-                         struct mount           *mp,
-			 struct thread		*td,
-			 struct ucred		*cred)
+static __inline int
+fdisp_simple_vfs_statfs(struct fuse_dispatcher *fdip,
+                         struct mount           *mp)
 {
    fdisp_init(fdip, 0);
-   fdisp_make(fdip, mp, FUSE_STATFS, FUSE_ROOT_ID, td, cred);
+   fdisp_make(fdip, mp, FUSE_STATFS, FUSE_ROOT_ID, NULL, NULL);
    return (fdisp_wait_answ(fdip));
 }
 
