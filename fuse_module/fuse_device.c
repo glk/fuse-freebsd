@@ -119,9 +119,9 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 
 	fdata = fdata_alloc(dev, td->td_ucred);
 
-	FUSE_LOCK;
+	FUSE_LOCK();
 	if (fusedev_get_data(dev)) {
-		FUSE_UNLOCK;
+		FUSE_UNLOCK();
 		fdata_destroy(fdata);
 		goto busy;
 	} else {
@@ -131,7 +131,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 		fdata->dataflag |= FSESS_OPENED;
 		dev->si_drv1 = fdata;
 	}	
-	FUSE_UNLOCK;
+	FUSE_UNLOCK();
 #if DO_GIANT_MANUALLY && ! USE_FUSE_LOCK
 	mtx_unlock(&Giant);
 #endif
@@ -159,7 +159,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 #if DO_GIANT_MANUALLY && ! USE_FUSE_LOCK
 	mtx_lock(&Giant);
 #endif
-	FUSE_LOCK;
+	FUSE_LOCK();
 	data = fusedev_get_data(dev);
 	if (! data)
 		panic("no fuse data upon fuse device close");
@@ -186,11 +186,11 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 		}
 		mtx_unlock(&data->aw_mtx);
 
-		FUSE_UNLOCK;
+		FUSE_UNLOCK();
 		goto out;
 	}
 	dev->si_drv1 = NULL;
-	FUSE_UNLOCK;
+	FUSE_UNLOCK();
 
 	fdata_destroy(data);
 

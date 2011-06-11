@@ -105,11 +105,11 @@ SYSCTL_DECL(_vfs_fuse);
 
 #if USE_FUSE_LOCK
 extern struct mtx fuse_mtx;
-#define FUSE_LOCK mtx_lock(&fuse_mtx)
-#define FUSE_UNLOCK mtx_unlock(&fuse_mtx)
+#define FUSE_LOCK() mtx_lock(&fuse_mtx)
+#define FUSE_UNLOCK() mtx_unlock(&fuse_mtx)
 #else
-#define FUSE_LOCK
-#define FUSE_UNLOCK
+#define FUSE_LOCK()
+#define FUSE_UNLOCK()
 #endif
 
 #define RECTIFY_TDCR(td, cred)			\
