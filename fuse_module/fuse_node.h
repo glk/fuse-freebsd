@@ -10,22 +10,14 @@
 #include <sys/mutex.h>
 
 #include "fuse_file.h"
-#include "fuse_nodehash.h"
-
-enum {
-    kFSNodeMagic    = 1,
-    kFSNodeBadMagic = 2,
-    kHNodeMagic     = 3,
-};
 
 #define FN_CREATING      0x00000001
 
 struct fuse_vnode_data {
-    uint32_t   fMagic;
-    boolean_t  fInitialised;
     uint64_t   nid;
     uint64_t   nlookup;
     enum vtype vtype;
+    /* XXXIP very likely to be stale, it's not updated in rename() */
     uint64_t   parent_nid;
 
     struct mtx createlock;
@@ -40,16 +32,17 @@ struct fuse_vnode_data {
      * modified. Typically, we would take this lock at the beginning of a
      * vnop and drop it at the end of the vnop.
      */
-    struct sx *nodelock;
+    struct sx nodelock;
     void      *nodelockowner;
 
     /*
      * The truncatelock guards against the EOF changing on us (that is, a
      * file resize) unexpectedly.
      */
-    struct sx  *truncatelock;
+    struct sx  truncatelock;
 
     struct vnode *c_vp;
+    /* XXXIP reference is very likely to be stale, it's not updated in rename() */
     struct vnode *parent;
     off_t      filesize; 
     off_t      newfilesize;
@@ -59,13 +52,11 @@ struct fuse_vnode_data {
     struct vattr      cached_attrs;
     struct timespec   cached_attrs_valid;
 };
-typedef struct fuse_vnode_data * fusenode_t;
 
-#define VTOFUD(vp) \
-    ((struct fuse_vnode_data *)FSNodeGenericFromHNode((vp)->v_data))
+#define VTOFUD(vp)  ((struct fuse_vnode_data *)((vp)->v_data))
 #define VTOI(vp)    (VTOFUD(vp)->nid)
 #define VTOVA(vp)   (&(VTOFUD(vp)->cached_attrs))
-#define VTOILLU(vp) ((unsigned long long)(VTOFUD(vp) ? VTOI(vp) : 0))
+#define VTOILLU(vp) ((uint64_t)(VTOFUD(vp) ? VTOI(vp) : 0))
 
 #define FUSE_NULL_ID 0
 
@@ -78,17 +69,6 @@ fuse_invalidate_attr(struct vnode *vp)
 }
 
 MALLOC_DECLARE(M_FUSEVN);
-
-vfs_hash_cmp_t fuse_vnode_cmp;
-vfs_hash_cmp_t fuse_vnode_setparent_cmp;
-
-void fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
-                     uint64_t nodeid, enum vtype vtyp, uint64_t parentid);
-void fuse_vnode_ditch(struct vnode *vp, struct thread *td);
-void fuse_vnode_teardown(struct vnode *vp, struct thread *td,
-                         struct ucred *cred, enum vtype vtyp);
-
-enum vget_mode { VG_NORMAL, VG_WANTNEW, VG_FORCENEW };
 
 struct get_filehandle_param {
     enum fuse_opcode opcode;
@@ -116,37 +96,17 @@ struct get_filehandle_param {
 #define C_CREATING           0x04000
 #define C_ACCESS_NOOP        0x08000
 
-int
-FSNodeGetOrCreateFileVNodeByID(struct mount *mp,
-                               uint64_t   nodeid,
-                               struct vnode *dvp,
-                               enum vtype vtyp,
-                               uint64_t   insize,
-                               struct vnode **vnPtr,
-                               int        flags);
+extern struct vop_vector fuse_vnops;
 
-void FSNodeScrub(struct fuse_vnode_data *fvdat);
+void fuse_vnode_destroy(struct vnode *vp);
 
 int
-fuse_vget_i(struct mount *mp,
-            struct thread *td,
-            uint64_t nodeid,
-            enum vtype vtyp,
-            struct vnode **vpp,
-            enum vget_mode vmod,
-            uint64_t parentid);
-#ifdef XXXIP
-int
-fuse_vget_i(struct mount         *mp,
-            uint64_t              nodeid,
-            vfs_context_t         context,
-            struct vnode         *dvp,
-            struct vnode         *vpp,
-            struct componentname *cnp,
-            enum vtype            vtyp,
-            uint64_t              size,
-            enum vget_mode        mode,
-            uint64_t              parentid);
-#endif
+fuse_vnode_get(struct mount         *mp,
+               uint64_t              nodeid,
+               struct vnode         *dvp,
+               struct vnode        **vpp,
+               struct componentname *cnp,
+               enum vtype            vtyp,
+               uint64_t              size);
 
 #endif /* _FUSE_NODE_H_ */
