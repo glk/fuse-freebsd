@@ -3,18 +3,19 @@
 
 /* prototype for processing an input data buffer and an uio
    for reading related acivities */
-typedef	int fuse_buffeater_t(struct uio *uio, size_t reqsize, void *buf, size_t bufsize, void *param);
+typedef	int fuse_buffeater_t(struct uio *uio, size_t reqsize,
+    void *buf, size_t bufsize, void *param);
 
 /* data used through an I/O operation */
 struct fuse_io_data {
-	struct vnode *vp;
-	struct fuse_filehandle *fufh;
-	struct uio *uio;
-	struct ucred *cred;
-	struct thread *td;
-	enum fuse_opcode opcode;
-	fuse_buffeater_t *buffeater;
-	void *param;
+    struct vnode *vp;
+    struct fuse_filehandle *fufh;
+    struct uio *uio;
+    struct ucred *cred;
+    struct thread *td;
+    enum fuse_opcode opcode;
+    fuse_buffeater_t *buffeater;
+    void *param;
 };
 
 int fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
