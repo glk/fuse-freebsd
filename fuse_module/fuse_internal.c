@@ -280,8 +280,6 @@ fuse_internal_fsync(struct vnode           *vp,
 int
 fuse_internal_readdir(struct vnode           *vp,
                       struct uio             *uio,
-                      struct thread          *td,
-                      struct ucred           *cred,
                       struct fuse_filehandle *fufh,
                       struct fuse_iov        *cookediov)
 {
@@ -300,7 +298,7 @@ fuse_internal_readdir(struct vnode           *vp,
     while (uio_resid(uio) > 0) {
 
         fdi.iosize = sizeof(*fri);
-        fdisp_make_vp(&fdi, FUSE_READDIR, vp, td, cred);
+        fdisp_make_vp(&fdi, FUSE_READDIR, vp, NULL, NULL);
 
         fri = fdi.indata;
         fri->fh = fufh->fh_id;
@@ -544,6 +542,7 @@ fuse_internal_newentry_makerequest(struct mount *mp,
 int
 fuse_internal_newentry_core(struct vnode *dvp,
                             struct vnode **vpp,
+                            struct componentname   *cnp,
                             enum vtype vtyp,
                             struct fuse_dispatcher *fdip)
 {
@@ -563,8 +562,8 @@ fuse_internal_newentry_core(struct vnode *dvp,
         goto out;
     }
 
-    err = fuse_vget_i(mp, curthread, feo->nodeid, vtyp, vpp,
-                      VG_FORCENEW, VTOI(dvp));
+    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp,
+	vtyp, 0);
     if (err) {
         fuse_internal_forget_send(mp, curthread, NULL, feo->nodeid, 1, fdip);
         return err;
@@ -593,7 +592,7 @@ fuse_internal_newentry(struct vnode *dvp,
     fdisp_init(&fdi, 0);
     fuse_internal_newentry_makerequest(vnode_mount(dvp), VTOI(dvp), cnp,
 	                               op, buf, bufsize, &fdi);
-    err = fuse_internal_newentry_core(dvp, vpp, vtyp, &fdi);
+    err = fuse_internal_newentry_core(dvp, vpp, cnp, vtyp, &fdi);
     fuse_invalidate_attr(dvp);
 
     return (err);

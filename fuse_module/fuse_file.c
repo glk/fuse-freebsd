@@ -3,14 +3,34 @@
  * Amit Singh <singh@>
  */
 
+#include "config.h"
+
+#include <sys/types.h>
+#include <sys/module.h>
+#include <sys/systm.h>
+#include <sys/errno.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/conf.h>
+#include <sys/uio.h>
+#include <sys/malloc.h>
+#include <sys/queue.h>
+#include <sys/lock.h>
+#include <sys/sx.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/mount.h>
+#include <sys/vnode.h>
+#include <sys/sysctl.h>
+
 #include "fuse.h"
 #include "fuse_file.h"
+#include "fuse_internal.h"
 #include "fuse_ipc.h"
 #include "fuse_node.h"
-#include "fuse_sysctl.h"
 
 int
-fuse_filehandle_get(vnode_t vp, vfs_context_t context, fufh_type_t fufh_type)
+fuse_filehandle_get(struct vnode *vp, struct thread *td, struct ucred *cred, fufh_type_t fufh_type)
 {
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_dispatcher  fdi;
@@ -42,7 +62,7 @@ fuse_filehandle_get(vnode_t vp, vfs_context_t context, fufh_type_t fufh_type)
     }
 
     fdisp_init(&fdi, sizeof(*foi));
-    fdisp_make_vp(&fdi, op, vp, context);
+    fdisp_make_vp(&fdi, op, vp, td, cred);
 
     foi = fdi.indata;
     foi->flags = oflags;
@@ -68,7 +88,7 @@ fuse_filehandle_get(vnode_t vp, vfs_context_t context, fufh_type_t fufh_type)
 }
 
 int
-fuse_filehandle_put(vnode_t vp, vfs_context_t context, fufh_type_t fufh_type,
+fuse_filehandle_put(struct vnode *vp, struct thread *td, struct ucred *cred, fufh_type_t fufh_type,
                     int foregrounded)
 {
     struct fuse_dispatcher  fdi;
@@ -103,7 +123,7 @@ fuse_filehandle_put(vnode_t vp, vfs_context_t context, fufh_type_t fufh_type,
     }
 
     fdisp_init(&fdi, sizeof(*fri));
-    fdisp_make_vp(&fdi, op, vp, context);
+    fdisp_make_vp(&fdi, op, vp, td, cred);
     fri = fdi.indata;
     fri->fh = fufh->fh_id;
     fri->flags = fufh->open_flags;

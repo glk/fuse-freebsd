@@ -1930,7 +1930,7 @@ fuse_vnop_symlink(struct vop_symlink_args *ap)
 	((char *)fdi.indata)[cnp->cn_namelen] = '\0';
 	memcpy((char *)fdi.indata + cnp->cn_namelen + 1, target, len);
 
-	err = fuse_internal_newentry_core(dvp, vpp, VLNK, &fdi);
+	err = fuse_internal_newentry_core(dvp, vpp, cnp, VLNK, &fdi);
 	fuse_invalidate_attr(dvp);
 	return (err);
 }

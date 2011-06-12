@@ -196,8 +196,6 @@ struct pseudo_dirent {
 int
 fuse_internal_readdir(struct vnode           *vp,
                       struct uio             *uio,
-                      struct thread          *td,
-                      struct ucred           *cred,
                       struct fuse_filehandle *fufh,
                       struct fuse_iov        *cookediov);
 
@@ -276,6 +274,7 @@ fuse_internal_newentry_makerequest(struct mount *mp,
 int
 fuse_internal_newentry_core(struct vnode *dvp,
                             struct vnode **vpp,
+                            struct componentname   *cnp,
                             enum vtype vtyp,
                             struct fuse_dispatcher *fdip);
 
