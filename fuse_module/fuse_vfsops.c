@@ -541,47 +541,13 @@ unlock:
     return (0);
 }        
 
-/* stolen from portalfs */
 static int
-fuse_vfs_root(struct mount *mp, int flags, struct vnode **vpp)
+fuse_vfs_root(struct mount *mp, int lkflags, struct vnode **vpp)
 {
-	/*
-	 * Return locked reference to root.
-	 */
-	struct thread *td = curthread;
-	struct fuse_data *data = fusefs_get_data(mp);
-	struct vnode *vp;
+    int err;
 
-	DEBUG2G("mp %p: %s\n", mp, mp->mnt_stat.f_mntfromname);
-
-	if (! data) {
-		struct fuse_secondary_data *fsdat = fusefs_get_secdata(mp);
-		int err;
-
-		data = fsdat->master;
-		sx_slock(&data->mhierlock);
-		if (data->mpri == FM_PRIMARY)
-			err = fuse_vfs_root(data->mp, flags, vpp);
-		else
-			err = ENXIO;
-		sx_sunlock(&data->mhierlock);
-		return (err);
-	}
-
-	vp = data->rvp;
-	vref(vp);
-	vn_lock(vp, flags | LK_RETRY);
-	if (vp->v_type == VNON) {
-		struct vattr va;
-
-		(void)VOP_GETATTR(vp, &va, td->td_ucred);
-	}
-	*vpp = vp;
-#if _DEBUG2G
-	DEBUG2G("root node:\n");
-	vn_printf(vp, " * ");
-#endif
-	return (0);
+    err = fuse_vnode_get(mp, FUSE_ROOT_ID, NULL, vpp, NULL, VDIR, 0);
+    return (err);
 }
 
 static int
