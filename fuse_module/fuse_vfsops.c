@@ -40,9 +40,6 @@
 #define PRIV_VFS_FUSE_SYNC_UNMOUNT PRIV_VFS_MOUNT_NONUSER
 #endif
 
-
-static vfs_hash_cmp_t fuse_vnode_bgdrop_cmp;
-
 static vfs_mount_t fuse_vfs_mount;
 static vfs_unmount_t fuse_vfs_unmount;
 static vfs_root_t fuse_vfs_root;
@@ -68,57 +65,6 @@ SYSCTL_UINT(_vfs_fuse, OID_AUTO, sync_unmount, CTLFLAG_RW,
 MALLOC_DEFINE(M_FUSEVFS, "fuse_filesystem", "buffer for fuse vfs layer");
 
 extern struct vop_vector fuse_vnops;
-
-/******************
- *
- * >>> VFS hash comparators
- *
- ******************/
-
-int
-fuse_vnode_cmp(struct vnode *vp, void *nidp)
-{
-	return (VTOI(vp) != *((uint64_t *)nidp));
-}
-
-/*
- * This comparator is used for safely setting the parent_nid.
- */
-
-int
-fuse_vnode_setparent_cmp(struct vnode *vp, void *param)
-{
-	struct parentmanager_param *pmp = param;
-
-	if (VTOI(vp) == pmp->nodeid) {
-		KASSERT(! pmp->valid,
-		        ("more than one vnode seems to match #%llu",
-			 (unsigned long long)pmp->nodeid));
-		VTOFUD(vp)->parent_nid = pmp->parent_nid;
-		pmp->valid = 1;
-	}
-
-	return (1);
-}
-
-/*
- * Vnode comparison function which expicitly marks
- * clashing vnodes as unhashed (via setting id to 0)
- * before dropping them. So at gc time we'll know if
- * we have to remove the node from the hash.
- */
-
-static int
-fuse_vnode_bgdrop_cmp(struct vnode *vp, void *param)
-{
-	struct fuse_vnode_data *fvdat = param;
-
-	if (VTOI(vp) != fvdat->nid)
-		return (1);
-
-	fvdat->nid = FUSE_NULL_ID;
-	return (0);
-}
 
 /*************
  *
