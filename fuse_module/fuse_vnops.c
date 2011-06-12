@@ -74,7 +74,7 @@ static vop_putpages_t fuse_vnop_putpages;
 static vop_print_t    fuse_vnop_print;
 static vop_unlock_t   fuse_vnop_unlock;
 
-static struct vop_vector fuse_vnops = {
+struct vop_vector fuse_vnops = {
 	.vop_default       = &default_vnodeops,
 	.vop_access        = fuse_vnop_access,
 	.vop_close         = fuse_vnop_close,
