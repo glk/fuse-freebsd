@@ -587,263 +587,56 @@ fuse_vfs_root(struct mount *mp, int flags, struct vnode **vpp)
 static int
 fuse_vfs_statfs(struct mount *mp, struct statfs *sbp)
 {
-	struct thread *td = curthread;
-	struct fuse_dispatcher fdi;
-	struct fuse_statfs_out *fsfo;
-	struct fuse_data *data;
-	int err = 0;	
+    struct fuse_dispatcher fdi;
+    struct fuse_statfs_out *fsfo;
+    struct fuse_data *data;
+    int err = 0;	
 
-	DEBUG2G("mp %p: %s\n", mp, mp->mnt_stat.f_mntfromname);
-	data = fusefs_get_data(mp);
+    DEBUG2G("mp %p: %s\n", mp, mp->mnt_stat.f_mntfromname);
+    data = fusefs_get_data(mp);
 
-	if (! data) {
-		struct fuse_secondary_data *fsdat;
+    if (!(data->dataflag & FSESS_INITED))
+        goto fake;
 
-		fsdat = fusefs_get_secdata(mp);
-		data = fsdat->master;
+    if ((err = fdisp_simple_vfs_statfs(&fdi, mp))) {
+        if (err == ENOTCONN) {
+            /*
+             * We want to seem a legitimate fs even if the daemon
+             * is stiff dead... (so that, eg., we can still do path
+             * based unmounting after the daemon dies).
+             */
+            goto fake;
+        }
+        return (err);
+    }
 
-		sx_slock(&data->mhierlock);
-		if (data->mpri == FM_PRIMARY)
-			err = fuse_vfs_statfs(data->mp, sbp);
-		else
-			err = ENXIO;
-		sx_sunlock(&data->mhierlock);
-		return (err);
-	}
+    fsfo = fdi.answ;
 
-	if (! (data->dataflag & FSESS_INITED))
-		goto fake;
+    sbp->f_blocks  = fsfo->st.blocks;
+    sbp->f_bfree   = fsfo->st.bfree;
+    sbp->f_bavail  = fsfo->st.bavail;
+    sbp->f_files   = fsfo->st.files;
+    sbp->f_ffree   = fsfo->st.ffree; /* cast from uint64_t to int64_t */
+    sbp->f_namemax = fsfo->st.namelen;
+    sbp->f_bsize   = fsfo->st.frsize; /* cast from uint32_t to uint64_t */
 
-	if ((err = fdisp_simple_putget(&fdi, FUSE_STATFS, data->rvp, td,
-	    NULL))) {
-		if (err == ENOTCONN)
-			/*
-			 * We want to seem a legitimate fs even if the daemon
-			 * is stiff dead... (so that, eg., we can still do path
-			 * based unmounting after the daemon dies).
-			 */
-			goto fake;
+    DEBUG("fuse_statfs_out -- blocks: %llu, bfree: %llu, bavail: %llu, "
+        "files: %llu, ffree: %llu, bsize: %i, namelen: %i\n",
+        (unsigned long long)fsfo->st.blocks, (unsigned long long)fsfo->st.bfree,
+        (unsigned long long)fsfo->st.bavail, (unsigned long long)fsfo->st.files,
+        (unsigned long long)fsfo->st.ffree, fsfo->st.bsize, fsfo->st.namelen);
 
-		return (err);
-	}
+    fuse_ticket_drop(fdi.tick);
 
-	fsfo = fdi.answ;
-
-	sbp->f_blocks  = fsfo->st.blocks;
-	sbp->f_bfree   = fsfo->st.bfree;
-	sbp->f_bavail  = fsfo->st.bavail;
-	sbp->f_files   = fsfo->st.files;
-	sbp->f_ffree   = fsfo->st.ffree; /* cast from uint64_t to int64_t */
-	sbp->f_namemax = fsfo->st.namelen;
-	if (fuse_libabi_geq(fusefs_get_data(mp), 7, 3)) {
-		/*
-		 * fuse_kstatfs is created from a struct statvfs, we can fill
-		 * the statfs struct by inverting sfs2svfs() of lib/libc/gen/statvfs.c
-		 */
-#if 0
-		/*
-		 * This would pretty much **ck up buffered IO,
-		 * since this would overwrite mnt_stat.f_iosize
-		 */
-		sbp->f_iosize  = fsfo->st.bsize; /* cast from uint32_t to uint64_t */
-#endif
-		sbp->f_bsize = 0; /* userspace data is broken ... */
-#if FUSE_KERNELABI_GEQ(7, 4)
-		if (fuse_libabi_geq(fusefs_get_data(mp), 7, 4))
-			/* ... unless both kernel and userspace speak 7.4 */
-			sbp->f_bsize = fsfo->st.frsize; /* cast from uint32_t to uint64_t */
-#endif
-	} else
-		/*
-		 * fuse_kstatfs is also created from a struct statfs,
-		 * conversion is direct
-		 */
-		sbp->f_bsize = fsfo->st.bsize; /* cast from uint32_t to uint64_t */
-
-	DEBUG("fuse_statfs_out -- blocks: %llu, bfree: %llu, bavail: %llu, files: %llu, ffree: %llu, bsize: %i, namelen: %i\n",
-	(unsigned long long)fsfo->st.blocks, (unsigned long long)fsfo->st.bfree, (unsigned long long)fsfo->st.bavail, (unsigned long long)fsfo->st.files, (unsigned long long)fsfo->st.ffree, fsfo->st.bsize, fsfo->st.namelen);
-
-	fuse_ticket_drop(fdi.tick);
-
-	return (0);
+    return (0);
 fake:
-        sbp->f_blocks  = 0;
-	sbp->f_bfree   = 0;
-	sbp->f_bavail  = 0;
-	sbp->f_files   = 0;
-	sbp->f_ffree   = 0;
-	sbp->f_namemax = 0;
-	sbp->f_bsize   = 0;
+    sbp->f_blocks  = 0;
+    sbp->f_bfree   = 0;
+    sbp->f_bavail  = 0;
+    sbp->f_files   = 0;
+    sbp->f_ffree   = 0;
+    sbp->f_namemax = 0;
+    sbp->f_bsize   = 0;
 
-	return (0);
-}
-
-/*
- *  ..._i, as "internal" -- we don't need to register it as a VFS op,
- *  so we might alter from the VFS_VGET signature
- */
-
-int
-fuse_vget_i(struct mount *mp, struct thread *td, uint64_t nodeid,
-            enum vtype vtyp, struct vnode **vpp, enum vget_mode vmod,
-            uint64_t parentid)
-{
-#define myflags LK_EXCLUSIVE | LK_RETRY
-	int err = 0;
-	struct fuse_vnode_data *fvdat;
-	struct vnode *vp2;
-
-	DEBUG("been asked for vno #%llu, parent #%llu\n",
-	        (long long unsigned)nodeid, (long long unsigned)parentid);
-
-	if (vtyp == VNON)
-		return (EINVAL);
-
-	if (nodeid == FUSE_ROOT_ID) {
-		if (parentid != FUSE_NULL_ID)
-			return (ENOENT);
-		err = VFS_ROOT(mp, myflags, vpp);
-		if (err)
-			return (err);
-		KASSERT(*vpp, ("we neither err'd nor found the root node"));
-		goto found;
-	}
-
-	/*
-	 * With vmod == VG_WANTNEW, caller wants to get a vnode for the id
-	 * only if it's a new one. Hence, no use of trying to get
-	 * to get one with the given id.
-	 */
-	if (vmod == VG_WANTNEW)
-		*vpp = NULL;
-	else if ((err = vfs_hash_get(mp, nodeid, /*flags*/ myflags, td, vpp,
-		                     fuse_vnode_cmp, &nodeid)))
-		return (err);
-
-	/*
-	 * If vmod == VG_FORCENEW, we also want a new vnode, but instead of
-	 * just bitching when there is an old one with the given id, we
-	 * go and search & destroy those ones...
-	 */
-	 if (*vpp && vmod == VG_FORCENEW) {
-		fuse_vnode_teardown(*vpp, td, NULL, vtyp);
-		*vpp = NULL;
-	}
-
-audit:
-	if (*vpp) {
-		DEBUG("vnode taken from hash\n");
-		if ((*vpp)->v_type == vtyp) {
-			if (vtyp == VDIR && parentid != FUSE_NULL_ID &&
-			    VTOFUD(*vpp)->parent_nid != parentid) {
-				DEBUG("parent mismatch\n");
-				if (VTOFUD(*vpp)->parent_nid == FUSE_NULL_ID) {
-					/*
-					 * Deleted directory is to be reused.
-					 * We adjust the nodeid to the new scenario.
-					 */
-					struct parentmanager_param pmp;
-					struct vnode *xvp;
-
-					DEBUG("dir has no parent, pushing in required\n");
-					pmp.nodeid = nodeid;
-					pmp.parent_nid = parentid;
-					pmp.valid = 0;
-					err = vfs_hash_get(mp, pmp.nodeid, 0,
-					                   td, &xvp,
-					                   fuse_vnode_setparent_cmp,
-					                   &pmp);
-					KASSERT(xvp == NULL,
-					        ("findparent routine has fetched a vnode"));
-				} else
-					/* parent mismatch for a directory */
-					err = EIO;
-
-				if (err) {
-					vput(*vpp);
-					*vpp = NULL;
-					return (err);
-				}
-			}
-			goto found;
-		} else if ((*vpp)->v_type == VNON) {
-			DEBUG2G("vnode #%llu with no type\n", VTOILLU(*vpp));
-			(*vpp)->v_type = vtyp;
-			goto found;
-		} else {
-			fuse_vnode_ditch(*vpp, td);
-			vput(*vpp);
-		}
-	} else if (parentid == FUSE_NULL_ID) {
-		DEBUG("no vpp, no parentid => ENOENT\n");
-		*vpp = NULL;
-		return (ENOENT);
-	}
-
-	/* as the big guys say, malloc for your data before getnewvnode() */
-
-	fvdat = malloc(sizeof(*fvdat), M_FUSEVN, M_WAITOK | M_ZERO);
-	err = getnewvnode("fuse", mp, &fuse_vnops, vpp);
-#if _DEBUG
-	DEBUG2G("allocated new vnode:\n");
-	vn_printf(*vpp, " * ");
-#endif
-
-	if (err) {
-	        free(fvdat, M_FUSEVN);
-		VNASSERT(! *vpp, *vpp,
-		         ("Maybe I misunderstood how getnewvnode() works..."));
-	        return (err);
-	}
-
-	err = vn_lock(*vpp, myflags);
-	if (err)
-		printf("fuse4bsd: leaking vnode %p\n", *vpp);
-	else
-		err = insmntque(*vpp, mp);
-	if (err) {
-	        free(fvdat, M_FUSEVN);
-	        return (err);
-	}
-
-	/*
-	 * There is no harm in fully initializing the vnode before trying
-	 * at insertion, because vnodes are gc-d anyway. For the same reason,
-	 * they _do_ have to be fully initialized here -- the gc routines should
-	 * get the node in an as much predictable state as it's possible.
-	 */
-	fuse_vnode_init(*vpp, fvdat, nodeid, vtyp, parentid);
-	err = vfs_hash_insert(*vpp, nodeid, /*flags*/ myflags, td, &vp2,
-	                      fuse_vnode_bgdrop_cmp, fvdat);
-
-	if (err) {
-		free(fvdat, M_FUSEVN);
-		/* XXX do something to tear down allocated inode?
-		 * (other fss' code doesn't, so neither I...)
-		 */ 
-		return (err);
-	}
-
-	if (vp2) {
-		DEBUG("gee, vfs hash collision for node #%llu\n", (unsigned long long)nodeid);
-		if (vmod == VG_WANTNEW) {
-			vput(vp2);
-			*vpp = NULL;
-			return (EEXIST);
-		} else if (vmod == VG_FORCENEW) {
-			fuse_vnode_teardown(vp2, td, NULL, vtyp);
-			*vpp = NULL;
-			goto audit;
-		}
-		vpp = &vp2;
-		goto audit;
-	}
-
-found:
-#if _DEBUG
-	DEBUG2G("\n");
-	vn_printf(*vpp, " * ");
-#endif
-	return (0);
-#undef myflags
+    return (0);
 }
