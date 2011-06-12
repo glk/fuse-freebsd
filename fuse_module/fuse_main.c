@@ -37,13 +37,8 @@ extern void fusedev_clone(void *arg, struct ucred *cred, char *name,
 extern struct vfsops fuse_vfsops;
 extern struct cdevsw fuse_cdevsw;
 extern struct vop_vector fuse_vnops;
-extern struct fileops fuse_fileops;
 extern struct clonedevs *fuseclones;
 extern int fuse_pbuf_freecnt;
-#if FUSE_HAS_CREATE
-extern struct vop_vector fuse_germ_vnops;
-extern vop_access_t fuse_germ_access;
-#endif
 
 static struct vfsconf fuse_vfsconf = {
 	.vfc_version = VFS_VERSION,
@@ -86,23 +81,7 @@ fuse_loader(struct module *m, int what, void *arg)
 
 	switch (what) {
 	case MOD_LOAD:                /* kldload */
-
-#if __FreeBSD_version > 800009
-	        fuse_fileops.fo_truncate = vnops.fo_truncate;
-#endif
-		fuse_fileops.fo_ioctl    = vnops.fo_ioctl;
-		fuse_fileops.fo_poll     = vnops.fo_poll;
-		fuse_fileops.fo_kqfilter = vnops.fo_kqfilter;
-		fuse_fileops.fo_stat     = vnops.fo_stat;
-
 		fuse_pbuf_freecnt = nswbuf / 2 + 1;
-
-#if FUSE_HAS_CREATE
-		memcpy(&fuse_germ_vnops, &dead_vnodeops, sizeof(struct vop_vector));
-		fuse_germ_vnops.vop_access = fuse_germ_access;
-		fuse_germ_vnops.vop_open = fuse_vnops.vop_open;
-#endif
-
 		clone_setup(&fuseclones);
 #ifdef USE_FUSE_LOCK
 		mtx_init(&fuse_mtx, "fuse_mtx", NULL, MTX_DEF);

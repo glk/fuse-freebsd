@@ -80,14 +80,6 @@ uio_setresid(struct uio *uio, ssize_t resid)
     uio->uio_resid = resid;
 }
 
-/* XXX */
-void cluster_push(struct vnode *vp, int a);
-
-struct fuse_pidcred {
-    pid_t pid;
-    struct ucred cred;
-};
-
 /* access */
 
 #define FVP_ACCESS_NOOP   0x01
@@ -223,9 +215,6 @@ fuse_internal_rename(struct vnode *fdvp,
                      struct componentname *tcnp);
 
 /* strategy */
-
-
-
 
 /* entity creation */
 

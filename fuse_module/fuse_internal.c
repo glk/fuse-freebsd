@@ -511,10 +511,6 @@ fuse_internal_rename(struct vnode *fdvp,
 
 /* strategy */
 
-
-
-
-
 /* entity creation */
 
 void
