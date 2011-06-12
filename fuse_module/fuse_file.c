@@ -67,7 +67,9 @@ fuse_filehandle_get(struct vnode *vp, struct thread *td, struct ucred *cred, fuf
     foi = fdi.indata;
     foi->flags = oflags;
 
+#ifdef XXXIP
     fuse_fh_upcall_count++;
+#endif
     if ((err = fdisp_wait_answ(&fdi))) {
         debug_printf("OUCH ... daemon didn't give fh (err = %d)\n", err);
         return err;

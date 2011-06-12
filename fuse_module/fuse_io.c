@@ -35,23 +35,65 @@
 #include <vm/vnode_pager.h>
 #include <vm/vm_object.h>
 
-#if (__FreeBSD__ >= 8)
-#define vfs_bio_set_validclean vfs_bio_set_valid
-#endif
-
 #include "fuse.h"
 #include "fuse_file.h"
 #include "fuse_node.h"
 #include "fuse_ipc.h"
 #include "fuse_io.h"
 
-int fuse_read_directbackend(struct fuse_io_data *fioda);
+static int fuse_read_directbackend(struct fuse_io_data *fioda);
 static int fuse_io_p2p(struct fuse_io_data *fioda, struct fuse_dispatcher *fdip);
 static int fuse_read_biobackend(struct fuse_io_data *fioda);
 static int fuse_write_directbackend(struct fuse_io_data *fioda);
 static int fuse_write_biobackend(struct fuse_io_data *fioda);
 
 static fuse_buffeater_t fuse_std_buffeater; 
+
+static int
+fuse_io_filehandle_get(struct vnode *vp, int rdonly,
+    struct ucred *cred, struct fuse_filehandle **fufhp)
+{
+	struct fuse_vnode_data *fvdat = VTOFUD(vp);
+	struct fuse_filehandle *fufh;
+	fufh_type_t fufh_type;
+	int err = 0;
+
+	if (rdonly) {
+		fufh_type = FUFH_RDONLY; // FUFH_RDWR will also do
+	} else {
+		fufh_type = FUFH_WRONLY; // FUFH_RDWR will also do
+	}
+
+	fufh = &(fvdat->fufh[fufh_type]);
+	if (!(fufh->fufh_flags & FUFH_VALID)) {
+		fufh_type = FUFH_RDWR;
+		fufh = &(fvdat->fufh[fufh_type]);
+		if (!(fufh->fufh_flags & FUFH_VALID)) {
+			fufh = NULL;
+		} else {
+			debug_printf("strategy falling back to FUFH_RDWR ... OK\n");
+		}
+	}
+
+	if (fufh == NULL) {
+		if (rdonly) {
+			fufh_type = FUFH_RDONLY;
+		} else {
+			fufh_type = FUFH_RDWR;
+		}
+		err = fuse_filehandle_get(vp, NULL, cred, fufh_type);
+		if (!err) {
+			fufh = &(fvdat->fufh[fufh_type]);
+			debug_printf("STRATEGY: created *new* fufh of type %d\n",
+			    fufh_type);
+		}
+	} else {
+		debug_printf("STRATEGY: using existing fufh of type %d\n", fufh_type);
+	}
+
+	*fufhp = fufh;
+	return (err);
+}
 
 /****************
  *
@@ -61,29 +103,24 @@ static fuse_buffeater_t fuse_std_buffeater;
 
 /* main I/O dispatch routine */
 int
-fuse_io_dispatch(struct vnode *vp, struct fuse_filehandle *fufh, struct uio *uio,
-                 struct ucred *cred, int flag, struct thread *td)
+fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
+    struct ucred *cred)
 {
-	int err;
+	struct fuse_filehandle *fufh;
 	struct fuse_io_data fioda;
-	int directio;
+	int err, directio;
 
-	RECTIFY_TDCR(td, cred);
-	ASSERT_VOP_LOCKED__FH(vp);
-
-	if (fufh)
-		fufh->useco++;
-	else if ((err = fuse_get_filehandle(vp, NULL, cred, flag, &fufh, NULL))) {
-		DEBUG2G("no filehandle for vnode #%llu\n", VTOILLU(vp));
+	err = fuse_io_filehandle_get(vp, (uio->uio_rw == UIO_READ),
+	    cred, &fufh);
+	if (!err)
 		return (err);
-	}
 
 	bzero(&fioda, sizeof(fioda));
 	fioda.vp = vp;
 	fioda.fufh = fufh;
 	fioda.uio = uio;
 	fioda.cred = cred;
-	fioda.td = td;
+	fioda.td = curthread;
 
 	/*
 	 * Ideally, when the daemon asks for direct io at open time, the
@@ -95,7 +132,7 @@ fuse_io_dispatch(struct vnode *vp, struct fuse_filehandle *fufh, struct uio *uio
 	 * we hardwire it into the file's private data (similarly to Linux,
 	 * btw.).
 	 */
-	directio = (flag & O_DIRECT) || (fufh->flags & FOPEN_DIRECT_IO);
+	directio = (flag & O_DIRECT);
 
 	switch (uio->uio_rw) {
 	case UIO_READ:
@@ -125,62 +162,15 @@ fuse_io_dispatch(struct vnode *vp, struct fuse_filehandle *fufh, struct uio *uio
 		panic("uninterpreted mode passed to fuse_io_dispatch");
 	}
 
-	if (VTOFUD(vp))
-		fufh->useco--;
-	else
-		DEBUG2G("poor nasty nasty vnode %p...\n", vp);
 	fuse_invalidate_attr(vp);
 
 	return (err);
 }
 
-/* dispatch routine for file based I/O */
-int
-fuse_io_file(struct file *fp, struct uio *uio, struct ucred *cred, int flags,
-	     struct thread *td)
-{
-	struct fuse_filehandle *fufh;
-	struct vattr va;
-	struct vnode *vp, *ovl_vp = fp->f_vnode;
-	int err = 0;
-
-	vn_lock(ovl_vp, LK_EXCLUSIVE | LK_RETRY);
-
-	if (_file_is_bad(fp) || ! _file_is_fat(fp)) {
-		err = EBADF;
-		goto out;
-	}
-	fufh = FTOFH(fp);
-	vp = fufh->fh_vp;
-	ASSERT_VOP_LOCKED__FH(vp);
-
-	if (uio->uio_resid == 0)
-		goto out;
-
-	if (uio->uio_rw == UIO_WRITE && fp->f_flag & O_APPEND) {
-		if ((err = VOP_GETATTR(vp, &va, cred)))
-			goto out;
-		uio->uio_offset = va.va_size;
-	} else if ((flags & FOF_OFFSET) == 0)
-		uio->uio_offset = fp->f_offset;
-
-	err = fuse_io_dispatch(vp, fufh->op == FUSE_OPEN ? fufh : NULL, uio,
-	                       cred, fp->f_flag, td);
-
-	if ((flags & FOF_OFFSET) == 0)
-		fp->f_offset = uio->uio_offset;
-	fp->f_nextoff = uio->uio_offset;
-
-out:
-	VOP_UNLOCK(ovl_vp, 0);
-	DEBUG("leaving with %d\n", err);
-	return (err);
-}
-
 /* dispatch routine for vnode based I/O */
 int
-fuse_io_vnode(struct vnode *vp, struct ucred *cred, struct uio *uio,
-              int ioflag)
+fuse_io_vnode(struct vnode *vp, struct uio *uio,
+              int ioflag, struct ucred *cred)
 {
 	int fflag = (uio->uio_rw == UIO_READ) ? FREAD : FWRITE;
 	int err;
@@ -196,7 +186,7 @@ fuse_io_vnode(struct vnode *vp, struct ucred *cred, struct uio *uio,
 	if (ioflag & IO_SYNC)
 		fflag |= O_SYNC;
 
-	err = fuse_io_dispatch(vp, NULL, uio, cred, fflag, NULL);
+	err = fuse_io_dispatch(vp, uio, fflag, cred);
 
 	DEBUG("return with %d\n", err);
 	return (err);
@@ -258,7 +248,7 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
 		if ((bp->b_flags & B_CACHE) == 0) {
 			bp->b_iocmd = BIO_READ;
 			vfs_busy_pages(bp, 0);
-			err = fuse_strategy_i(vp, bp, fufh, op);
+			err = fuse_io_strategy(vp, bp, fufh, op);
 #if _DEBUG
 			prettyprint(bp->b_data, 48);
 			printf("\n");
@@ -305,7 +295,7 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
 	return ((err == -1) ? 0 : err);
 }
 
-int
+static int
 fuse_read_directbackend(struct fuse_io_data *fioda)
 {
 	struct vnode *vp = fioda->vp;
@@ -652,7 +642,7 @@ again:
 		if ((bp->b_flags & B_CACHE) == 0) {
 			bp->b_iocmd = BIO_READ;
 			vfs_busy_pages(bp, 0);
-			fuse_strategy_i(vp, bp, NULL, 0);
+			fuse_io_strategy(vp, bp, NULL, 0);
 			if ((err =  bp->b_error)) {
 				brelse(bp);
 				break;
@@ -742,7 +732,7 @@ again:
 				bp->b_dirtyoff = on;
 				bp->b_dirtyend = on + n;
 			}
-			vfs_bio_set_validclean(bp, on, n);
+			vfs_bio_set_valid(bp, on, n);
 		}
 
 		bwrite(bp);
@@ -755,7 +745,7 @@ again:
 
 /* core strategy like routine */
 int
-fuse_strategy_i(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
+fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
                 enum fuse_opcode op)
 {
 	struct fuse_dispatcher fdi;
@@ -793,22 +783,13 @@ fuse_strategy_i(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
 
 	cred = bp->b_iocmd == BIO_READ ? bp->b_rcred : bp->b_wcred;
 
-#if _DEBUG
-	DEBUG2G("reading from block #%d at vnode:\n", (int)bp->b_blkno);
-	vn_printf(vp, " * ");
-#endif
-	if (fufh) {
-		DEBUG2G("we have a useable filehandle passed on\n");
-		fufh->useco++;
-	} else
-		err = fuse_get_filehandle(vp, NULL, cred,
-	                             bp->b_iocmd == BIO_READ ? FREAD : FWRITE,
-		                     &fufh, NULL);
-
+	err = fuse_io_filehandle_get(vp, (bp->b_iocmd == BIO_READ),
+	    cred, &fufh);
 	if (err) {
 		DEBUG2G("fetching filehandle failed\n");
 		goto out;
 	}
+	fufh->fufh_flags |= FUFH_STRATEGY;
 
 	DEBUG2G("vp #%llu, fufh #%llu\n", VTOILLU(vp), (unsigned long long)fufh->fh_id);
 
@@ -952,9 +933,6 @@ eval:
 		DEBUG("no ticket on leave\n");
 
 out:
-	if (fufh)
-		fufh->useco--;
-
 	if (err) {
 		bp->b_ioflags |= BIO_ERROR;
 		bp->b_error = err;

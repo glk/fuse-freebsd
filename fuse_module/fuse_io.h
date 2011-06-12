@@ -1,3 +1,5 @@
+#ifndef _FUSE_IO_H_
+#define _FUSE_IO_H_
 
 /* prototype for processing an input data buffer and an uio
    for reading related acivities */
@@ -15,15 +17,12 @@ struct fuse_io_data {
 	void *param;
 };
 
-int fuse_io_dispatch(struct vnode *vp, struct fuse_filehandle *fufh,
-                     struct uio *uio, struct ucred *cred, int flag,
-                     struct thread *td);
-int fuse_io_file(struct file *fp, struct uio *uio, struct ucred *cred,
-                 int flags, struct thread *td);
-int fuse_io_vnode(struct vnode *vp, struct ucred *cred, struct uio *uio,
-                  int ioflag);
-int fuse_strategy_i(struct vnode *vp, struct buf *bp,
-                    struct fuse_filehandle *fufh, enum fuse_opcode op);
+int fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
+    struct ucred *cred);
+int fuse_io_vnode(struct vnode *vp, struct uio *uio, int ioflag,
+    struct ucred *cred);
+int fuse_io_strategy(struct vnode *vp, struct buf *bp,
+    struct fuse_filehandle *fufh, enum fuse_opcode op);
 
 /*
  * XXX for blocking vnode usage, it seems that changing vnops to dead ones
@@ -60,3 +59,5 @@ _file_is_fat(struct file *fp)
 {
 	return (fp->f_vnode && fp->f_data != fp->f_vnode);
 }
+
+#endif /* _FUSE_IO_H_ */
