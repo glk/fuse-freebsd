@@ -39,9 +39,11 @@
 #include "fuse_ipc.h"
 #include "fuse_node.h"
 #include "fuse_file.h"
-// #include "fuse_nodehash.h"
 #include "fuse_param.h"
-// #include "fuse_sysctl.h"
+
+#ifdef ZERO_PAD_INCOMPLETE_BUFS
+static int isbzero(void *buf, size_t len);
+#endif
 
 /* access */
 
@@ -358,7 +360,7 @@ fuse_internal_readdir_processdata(struct uio *uio,
             break;
         }
 
-#if FUSELIB_CONFORM_BIOREAD
+#ifdef ZERO_PAD_INCOMPLETE_BUFS
         if (isbzero(buf, FUSE_NAME_OFFSET)) {
             err = -1;
             break;
@@ -711,3 +713,19 @@ fuse_internal_send_init(struct fuse_data *data, struct thread *td)
     fuse_insert_callback(fdi.tick, fuse_internal_init_callback);
     fuse_insert_message(fdi.tick);
 }
+
+#ifdef ZERO_PAD_INCOMPLETE_BUFS
+static int
+isbzero(void *buf, size_t len)
+{
+    int i;
+
+    for (i = 0; i < len; i++)
+    {
+        if (((char *)buf)[i])
+            return (0);
+    }
+
+    return (1);
+}
+#endif

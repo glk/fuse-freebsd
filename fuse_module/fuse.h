@@ -225,10 +225,6 @@ void prettyprint(char *buf, size_t len);
 void fprettyprint(struct fuse_iov *fiov, size_t dlen);
 #endif
 
-#if _DEBUG || _DEBUG2G || _DEBUG3G || defined(INVARIANTS) || FUSELIB_CONFORM_BIOREAD
-int isbzero(void *buf, size_t len);
-#endif
-
 #if _DEBUG || _DEBUG2G || _DEBUG3G
 #include <sys/kdb.h>
 
