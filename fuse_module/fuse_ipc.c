@@ -52,9 +52,9 @@ static fuse_handler_t      fuse_standard_handler;
 SYSCTL_NODE(_vfs, OID_AUTO, fuse, CTLFLAG_RW, 0, "FUSE tunables");
 SYSCTL_STRING(_vfs_fuse, OID_AUTO, fuse4bsd_version, CTLFLAG_RD,
               FUSE4BSD_VERSION, 0, "fuse4bsd version");
-static int maxfreetickets = 1024;
-SYSCTL_INT(_vfs_fuse, OID_AUTO, maxfreetickets, CTLFLAG_RW,
-            &maxfreetickets, 0, "limit for number of free tickets kept");
+static int fuse_max_freetickets = 1024;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, max_freetickets, CTLFLAG_RW,
+            &fuse_max_freetickets, 0, "limit for number of free tickets kept");
 static long fuse_iov_permanent_bufsize = 1 << 19;
 SYSCTL_LONG(_vfs_fuse, OID_AUTO, iov_permanent_bufsize, CTLFLAG_RW,
             &fuse_iov_permanent_bufsize, 0,
@@ -121,10 +121,6 @@ fiov_refresh(struct fuse_iov *fiov)
     fiov_adjust(fiov, 0);
 }
 
-/* <== fuse_iov methods */
-
-/* fuse_ticket methods ==> */
-
 /*
  * Tickets are carriers of communication with a fuse daemon.
  * Tickets have a unique id, which should be kept unique
@@ -149,7 +145,6 @@ fiov_refresh(struct fuse_iov *fiov)
  *     (then, behind the scenes, either the ticket is destroyed, or put into
  *     cache)
  */
-
 
 static struct fuse_ticket *
 fticket_alloc(struct fuse_data *data)
@@ -488,8 +483,8 @@ fuse_ticket_drop(struct fuse_ticket *tick)
 
     mtx_lock(&tick->tk_data->ticket_mtx);
 
-    if (maxfreetickets >= 0 &&
-        maxfreetickets <= tick->tk_data->freeticket_counter) {
+    if (fuse_max_freetickets >= 0 &&
+        fuse_max_freetickets <= tick->tk_data->freeticket_counter) {
         die = 1;
     } else {
         mtx_unlock(&tick->tk_data->ticket_mtx);
@@ -752,12 +747,6 @@ fuse_setup_ihead(struct fuse_in_header *ihead,
     ihead->uid = cred->cr_uid;
     ihead->gid = cred->cr_rgid;
 }
-
-/********************
- *
- * >>> Callback handlers
- *
- ********************/
 
 /*
  * fuse_standard_handler just pulls indata and wakes up pretender.

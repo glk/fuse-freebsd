@@ -105,8 +105,13 @@ struct vop_vector fuse_vnops = {
 	.vop_unlock        = fuse_vnop_unlock,
 };
 
-MALLOC_DEFINE(M_FUSEVN, "fuse_vnode", "fuse vnode private data");
-MALLOC_DEFINE(M_FUSEFH, "fuse_filehandles", "buffer for fuse filehandles");
+static uint64_t fuse_lookup_cache_hits = 0;
+SYSCTL_QUAD(_vfs_fuse, OID_AUTO, lookup_cache_hits, CTLFLAG_RD,
+            &fuse_lookup_cache_hits, 0, "");
+
+static uint64_t fuse_lookup_cache_misses  = 0;
+SYSCTL_QUAD(_vfs_fuse, OID_AUTO, lookup_cache_misses, CTLFLAG_RD,
+            &fuse_lookup_cache_misses, 0, "");
 
 int fuse_pbuf_freecnt = -1;
 
@@ -650,15 +655,11 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
         switch (err) {
 
         case -1: /* positive match */
-#ifdef XXXIP
             fuse_lookup_cache_hits++;
-#endif
             return 0;
 
         case 0: /* no match in cache */
-#ifdef XXXIP
             fuse_lookup_cache_misses++;
-#endif
             break;
 
         case ENOENT: /* negative match */
@@ -1240,13 +1241,12 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
         return EBADF;
     }
 
-#ifdef XXXIP
+
     /* Sanity check the uio data. */
-    if ((uio_iovcnt(uio) > 1) ||
+    if ( /* XXXIP (uio_iovcnt(uio) > 1) || */
         (uio_resid(uio) < (int)sizeof(struct dirent))) {
         return (EINVAL);
     }
-#endif
 
     fvdat = VTOFUD(vp);
 
@@ -1363,7 +1363,6 @@ fuse_vnop_reclaim(struct vop_reclaim_args *ap)
     }
 
     cache_purge(vp);
-    /* XXXIP TODO */
     vfs_hash_remove(vp);
     vnode_destroy_vobject(vp);
     fuse_vnode_destroy(vp);
@@ -1620,7 +1619,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 
     facp.facc_flags &= ~FACCESS_XQUERIES;
 
-    if (err && ! (fsai->valid & ~(FATTR_ATIME | FATTR_MTIME)) &&
+    if (err && !(fsai->valid & ~(FATTR_ATIME | FATTR_MTIME)) &&
         vap->va_vaflags & VA_UTIMES_NULL) {
         err = fuse_internal_access(vp, VWRITE, cred, td, &facp);
     }

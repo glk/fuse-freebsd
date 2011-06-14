@@ -34,6 +34,8 @@
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
 
+MALLOC_DEFINE(M_FUSEVN, "fuse_vnode", "fuse vnode private data");
+
 static void
 fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     uint64_t nodeid, enum vtype vtyp)

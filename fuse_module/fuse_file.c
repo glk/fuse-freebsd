@@ -29,6 +29,10 @@
 #include "fuse_ipc.h"
 #include "fuse_node.h"
 
+static uint64_t fuse_fh_upcall_count = 0;
+SYSCTL_QUAD(_vfs_fuse, OID_AUTO, fh_upcall_count, CTLFLAG_RD,
+            &fuse_fh_upcall_count, 0, "");
+
 int
 fuse_filehandle_get(struct vnode *vp, struct thread *td, struct ucred *cred, fufh_type_t fufh_type)
 {
@@ -67,9 +71,7 @@ fuse_filehandle_get(struct vnode *vp, struct thread *td, struct ucred *cred, fuf
     foi = fdi.indata;
     foi->flags = oflags;
 
-#ifdef XXXIP
     fuse_fh_upcall_count++;
-#endif
     if ((err = fdisp_wait_answ(&fdi))) {
         debug_printf("OUCH ... daemon didn't give fh (err = %d)\n", err);
         return err;

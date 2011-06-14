@@ -68,8 +68,6 @@ fuse_invalidate_attr(struct vnode *vp)
     }
 }
 
-MALLOC_DECLARE(M_FUSEVN);
-
 struct get_filehandle_param {
     enum fuse_opcode opcode;
     uint8_t          do_gc:1;
