@@ -102,9 +102,9 @@ struct fuse_access_param {
 int
 fuse_internal_access(struct vnode *vp,
                      mode_t mode,
-                     struct ucred *cred,
+                     struct fuse_access_param *facp,
                      struct thread *td,
-                     struct fuse_access_param *facp);
+                     struct ucred *cred);
 
 /* attributes */
 

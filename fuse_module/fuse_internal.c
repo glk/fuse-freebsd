@@ -47,154 +47,112 @@ static int isbzero(void *buf, size_t len);
 
 /* access */
 
-static __inline int     fuse_check_spyable(struct fuse_dispatcher *fdip,
-                                           struct mount *mp, struct thread *td,
-                                           struct ucred *cred);
 static __inline int     fuse_match_cred(struct ucred *daemoncred,
                                         struct ucred *usercred);
 
 int
 fuse_internal_access(struct vnode *vp,
                      mode_t mode,
-                     struct ucred *cred,
+                     struct fuse_access_param *facp,
                      struct thread *td,
-                     struct fuse_access_param *facp)
+                     struct ucred *cred)
 {
     int err = 0;
+    uint32_t mask = 0;
+    int dataflag;
+    int vtype;
+    struct mount *mp;
     struct fuse_dispatcher fdi;
+    struct fuse_access_in *fai;
+    struct fuse_data      *data;
 
-    /*
-     * Disallow write attempts on read-only file systems; unless the file
-     * is a socket, fifo, or a block or character device resident on the
-     * file system.
-     */
+    /* NOT YET DONE */
+    /* If this vnop gives you trouble, just return 0 here for a lazy kludge. */
+    // return 0;
 
-    DEBUG("ro? %#x vp #%llu mode %#x\n",
-          vp->v_mount->mnt_flag & MNT_RDONLY, VTOILLU(vp), mode);
+    fuse_trace_printf_func();
 
-    RECTIFY_TDCR(td, cred);
+    mp = vnode_mount(vp);
+    vtype = vnode_vtype(vp);
 
-    if (mode & VWRITE) {
-            switch (vp->v_type) {
-            case VDIR:
-            case VLNK:
-            case VREG:
-                    if (vp->v_mount->mnt_flag & MNT_RDONLY) {
-                            DEBUG("no write access (read-only fs)\n");
-                            return (EROFS);
-                    }
-                    break;
-            default:
-                    break;
+    data = fusefs_get_data(mp);
+    dataflag = data->dataflag;
+
+    if ((mode & VWRITE) && vfs_isrdonly(mp)) {
+        return EACCES;
+    }
+
+    // Unless explicitly permitted, deny everyone except the fs owner.
+    if (vnode_isvroot(vp) && !(facp->facc_flags & FACCESS_NOCHECKSPY)) {
+        if (!(dataflag & FSESS_DAEMON_CAN_SPY)) {
+            int denied = fuse_match_cred(data->daemoncred,
+                                         cred);
+            if (denied) {
+                return EACCES;
             }
+        }
+        facp->facc_flags |= FACCESS_NOCHECKSPY;
+    }
+
+    if (!(facp->facc_flags & FACCESS_DO_ACCESS)) {
+        return 0;
+    }
+
+    if (((vtype == VREG) && (mode & VEXEC))) {
+#ifdef NEED_MOUNT_ARGUMENT_FOR_THIS
+        // Let the kernel handle this through open/close heuristics.
+        return ENOTSUP;
+#else
+        // Let the kernel handle this.
+        return 0;
+#endif
+    }
+
+    if (fusefs_get_data(mp)->dataflag & FSESS_NOACCESS) {
+        // Let the kernel handle this.
+        return 0;
+    }
+
+    if (dataflag & FSESS_DEFAULT_PERMISSIONS) {
+        // Let the kernel handle this.
+        return 0;
+    }
+
+    if ((mode & VADMIN) != 0) {
+        err = priv_check_cred(cred, PRIV_VFS_ADMIN, 0);
+        if (err) {
+            return err;
+        }
+    }
+
+    if ((mode & (VWRITE | VAPPEND | VADMIN)) != 0) {
+        mask |= W_OK;
+    }
+    if ((mode & VREAD) != 0) {
+        mask |= R_OK;
+    }
+    if ((mode & VEXEC) != 0) {
+        mask |= X_OK;
     }
 
     bzero(&fdi, sizeof(fdi));
-    if (vp->v_vflag & VV_ROOT && ! (facp->facc_flags & FACCESS_NOCHECKSPY)) {
-            if ((err = fuse_check_spyable(&fdi, vp->v_mount, td, cred)))
-                    return (err);
-            facp->facc_flags |= FACCESS_NOCHECKSPY;
+
+    fdisp_init(&fdi, sizeof(*fai));
+    fdisp_make_vp(&fdi, FUSE_ACCESS, vp, td, cred);
+
+    fai = fdi.indata;
+    fai->mask = F_OK;
+    fai->mask |= mask;
+
+    if (!(err = fdisp_wait_answ(&fdi))) {
+        fuse_ticket_drop(fdi.tick);
     }
 
-    if (fusefs_get_data(vp->v_mount)->dataflag & FSESS_DEFAULT_PERMISSIONS ||
-        /*
-         * According to Linux code, we fall back to in-kernel check
-         * when it comes to executing a file
-         */
-        (vp->v_type == VREG && mode == VEXEC)) {
-            /* We are to do the check in-kernel */
-
-            if (! (facp->facc_flags & FACCESS_VA_VALID)) {
-                    err = VOP_GETATTR(vp, VTOVA(vp), cred);
-                    if (err)
-                            return (err);
-                    facp->facc_flags |= FACCESS_VA_VALID;
-            }
-
-            err = vaccess(VTOVA(vp)->va_type,
-                          VTOVA(vp)->va_mode,
-                          VTOVA(vp)->va_uid,
-                          VTOVA(vp)->va_gid,
-                          mode, cred, NULL);
-
-            if (err)
-                    return (err);
-
-            if (facp->facc_flags & FACCESS_STICKY) {
-                    if (vp->v_type == VDIR && VTOVA(vp)->va_mode & S_ISTXT &&
-                        mode == VWRITE) {
-                            if (cred->cr_uid != facp->xuid &&
-                                cred->cr_uid != VTOVA(vp)->va_uid)
-                                    err = priv_check_cred(cred,
-                                                          PRIV_VFS_ADMIN,
-                                                          0);
-                    }
-                    /*
-                     * We return here because this flags is exlusive
-                     * with the others
-                     */
-                    KASSERT(facp->facc_flags == FACCESS_STICKY,
-                            ("sticky access check comes in mixed"));
-                    return (err);
-            }
-
-            if (mode != VADMIN)
-                    return (err);
-
-            if (facp->facc_flags & FACCESS_CHOWN) {
-                    if ((cred->cr_uid != facp->xuid &&
-                             facp->xuid != (uid_t)VNOVAL) ||
-                        (cred->cr_gid != facp->xgid &&
-                             facp->xgid != (gid_t)VNOVAL &&
-                             ! groupmember(facp->xgid, cred)))
-                            err = priv_check_cred(cred, PRIV_VFS_CHOWN, 0);
-                    if (err)
-                            return (err);
-            }
-
-            if (facp->facc_flags & FACCESS_SETGID) {
-                    gid_t sgid = facp->xgid;
-
-                    if (sgid == (gid_t)VNOVAL)
-                            sgid = VTOVA(vp)->va_gid;
-
-                    if (! groupmember(sgid, cred))
-                            err = priv_check_cred(cred, PRIV_VFS_SETGID, 0);
-                    return (err);
-            }
-
-    } else {
-#if FUSE_HAS_ACCESS
-            struct fuse_access_in *fai;
-
-            if (! (facp->facc_flags & FACCESS_DO_ACCESS))
-                    return (0);
-
-            if (fusefs_get_data(vp->v_mount)->dataflag & FSESS_NOACCESS)
-                    return (0);
-
-            fdisp_init(&fdi, sizeof(*fai));
-            fdisp_make_vp(&fdi, FUSE_ACCESS, vp, td, cred);
-
-            fai = fdi.indata;
-
-            fai->mask = F_OK;
-            if (mode & VREAD)
-                    fai->mask |= R_OK;
-            if (mode & VWRITE)
-                    fai->mask |= W_OK;
-            if (mode & VEXEC)
-                    fai->mask |= X_OK;
-
-            if (! (err = fdisp_wait_answ(&fdi)))
-                    fuse_ticket_drop(fdi.tick);
-
-            if (err == ENOSYS) {
-                    fusefs_get_data(vp->v_mount)->dataflag |= FSESS_NOACCESS;
-                    err = 0;
-            }
-#endif
+    if (err == ENOSYS) {
+        fusefs_get_data(mp)->dataflag |= FSESS_NOACCESS;
+        err = 0; // ENOTSUP;
     }
+
     return err;
 }
 
@@ -218,14 +176,6 @@ fuse_match_cred(struct ucred *basecred, struct ucred *usercred)
 		return (0);
 
 	return (EPERM);
-}
-
-
-static __inline int
-fuse_check_spyable(struct fuse_dispatcher *fdip, struct mount *mp,
-                   struct thread *td, struct ucred *cred)
-{
-	return (0);
 }
 
 /* fsync */

@@ -151,7 +151,7 @@ fuse_vnop_access(struct vop_access_args *ap)
         facp.facc_flags |= FACCESS_DO_ACCESS;
     }   
 
-    return fuse_internal_access(vp, ap->a_accmode, ap->a_cred, ap->a_td, &facp);
+    return fuse_internal_access(vp, ap->a_accmode, &facp, ap->a_td, ap->a_cred);
 }
 
 /*
@@ -632,7 +632,7 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
 
     bzero(&facp, sizeof(facp));
     if (vnode_isvroot(dvp)) { /* early permission check hack */
-        if ((err = fuse_internal_access(dvp, VEXEC, cred, td, &facp))) {
+        if ((err = fuse_internal_access(dvp, VEXEC, &facp, td, cred))) {
             return err;
         }
     }
@@ -781,7 +781,7 @@ calldaemon:
              */
             facp.xuid = fattr->uid;
             facp.facc_flags |= FACCESS_STICKY;
-            err = fuse_internal_access(dvp, VWRITE, cred, td, &facp);
+            err = fuse_internal_access(dvp, VWRITE, &facp, td, cred);
             facp.facc_flags &= ~FACCESS_XQUERIES;
 
             if (err) {
@@ -973,7 +973,7 @@ out:
                     err = ENOTDIR;
 
                 if (!err && !vnode_mountedhere(*vpp)) {
-                    err = fuse_internal_access(*vpp, VEXEC, cred, td, &facp);
+                    err = fuse_internal_access(*vpp, VEXEC, &facp, td, cred);
                 }
 
                 if (err) {
@@ -1621,7 +1621,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 
     if (err && !(fsai->valid & ~(FATTR_ATIME | FATTR_MTIME)) &&
         vap->va_vaflags & VA_UTIMES_NULL) {
-        err = fuse_internal_access(vp, VWRITE, cred, td, &facp);
+        err = fuse_internal_access(vp, VWRITE, &facp, td, cred);
     }
 
     if (err) {
