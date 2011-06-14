@@ -393,7 +393,7 @@ fuse_internal_remove(struct vnode *dvp,
     debug_printf("dvp=%p, cnp=%p, op=%d\n", vp, cnp, op);
 
     fdisp_init(&fdi, cnp->cn_namelen + 1);
-    fdisp_make_vp(&fdi, op, dvp, curthread, NULL);
+    fdisp_make_vp(&fdi, op, dvp, cnp->cn_thread, cnp->cn_cred);
 
     memcpy(fdi.indata, cnp->cn_nameptr, cnp->cn_namelen);
     ((char *)fdi.indata)[cnp->cn_namelen] = '\0';
@@ -478,7 +478,7 @@ fuse_internal_newentry_makerequest(struct mount *mp,
 
     fdip->iosize = bufsize + cnp->cn_namelen + 1;
 
-    fdisp_make(fdip, op, mp, dnid, curthread, NULL);
+    fdisp_make(fdip, op, mp, dnid, cnp->cn_thread, cnp->cn_cred);
     memcpy(fdip->indata, buf, bufsize);
     memcpy((char *)fdip->indata + bufsize, cnp->cn_nameptr, cnp->cn_namelen);
     ((char *)fdip->indata)[bufsize + cnp->cn_namelen] = '\0';
@@ -512,7 +512,7 @@ fuse_internal_newentry_core(struct vnode *dvp,
     err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp,
 	vtyp, 0);
     if (err) {
-        fuse_internal_forget_send(mp, curthread, NULL, feo->nodeid, 1, fdip);
+        fuse_internal_forget_send(mp, cnp->cn_thread, cnp->cn_cred, feo->nodeid, 1, fdip);
         return err;
     }
 
