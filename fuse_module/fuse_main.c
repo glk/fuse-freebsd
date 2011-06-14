@@ -31,7 +31,7 @@ struct mtx fuse_mtx;
 #endif
 
 
-extern void fusedev_clone(void *arg, struct ucred *cred, char *name,
+extern void fuse_device_clone(void *arg, struct ucred *cred, char *name,
                           int namelen, struct cdev **dev);
 
 extern struct vfsops fuse_vfsops;
@@ -86,7 +86,7 @@ fuse_loader(struct module *m, int what, void *arg)
 #ifdef USE_FUSE_LOCK
 		mtx_init(&fuse_mtx, "fuse_mtx", NULL, MTX_DEF);
 #endif
-		eh_tag = EVENTHANDLER_REGISTER(dev_clone, fusedev_clone, 0,
+		eh_tag = EVENTHANDLER_REGISTER(dev_clone, fuse_device_clone, 0,
 		                               1000);
 		if (eh_tag == NULL) {
 			clone_cleanup(&fuseclones);
