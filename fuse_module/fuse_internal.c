@@ -437,7 +437,7 @@ fuse_internal_rename(struct vnode *fdvp,
     int err = 0;
 
     fdisp_init(&fdi, sizeof(*fri) + fcnp->cn_namelen + tcnp->cn_namelen + 2);
-    fdisp_make_vp(&fdi, FUSE_RENAME, fdvp, curthread, NULL);
+    fdisp_make_vp(&fdi, FUSE_RENAME, fdvp, tcnp->cn_thread, tcnp->cn_cred);
 
     fri = fdi.indata;
     fri->newdir = VTOI(tdvp);
@@ -478,9 +478,8 @@ fuse_internal_newentry_makerequest(struct mount *mp,
 
     fdip->iosize = bufsize + cnp->cn_namelen + 1;
 
-    fdisp_make(fdip, mp, op, dnid, curthread, NULL);
+    fdisp_make(fdip, op, mp, dnid, curthread, NULL);
     memcpy(fdip->indata, buf, bufsize);
-
     memcpy((char *)fdip->indata + bufsize, cnp->cn_nameptr, cnp->cn_namelen);
     ((char *)fdip->indata)[bufsize + cnp->cn_namelen] = '\0';
 
@@ -582,7 +581,7 @@ fuse_internal_forget_send(struct mount *mp,
      */
 
     fdisp_init(fdip, sizeof(*ffi));
-    fdisp_make(fdip, mp, FUSE_FORGET, nodeid, td, cred);
+    fdisp_make(fdip, FUSE_FORGET, mp, nodeid, td, cred);
 
     ffi = fdip->indata;
     ffi->nlookup = nlookup;
@@ -653,7 +652,7 @@ fuse_internal_send_init(struct fuse_data *data, struct thread *td)
     struct fuse_dispatcher fdi;
 
     fdisp_init(&fdi, sizeof(*fiii));
-    fdisp_make(&fdi, data->mp, FUSE_INIT, 0, td, NULL);
+    fdisp_make(&fdi, FUSE_INIT, data->mp, 0, td, NULL);
     fiii = fdi.indata;
     fiii->major = FUSE_KERNEL_VERSION;
     fiii->minor = FUSE_KERNEL_MINOR_VERSION;

@@ -250,7 +250,7 @@ fuse_vnop_create(struct vop_create_args *ap)
         goto good_old;
     }
 
-    fdisp_make(fdip, vnode_mount(dvp), FUSE_CREATE, parentnid, td, cred);
+    fdisp_make(fdip, FUSE_CREATE, vnode_mount(dvp), parentnid, td, cred);
 
     foi = fdip->indata;
     foi->mode = mode;
@@ -308,7 +308,7 @@ bringup:
            uint64_t fh_id = ((struct fuse_open_out *)(feo + 1))->fh;
 
            fdisp_init(fdip, sizeof(*fri));
-           fdisp_make(fdip, mp, FUSE_RELEASE, nodeid, td, cred);
+           fdisp_make(fdip, FUSE_RELEASE, mp, nodeid, td, cred);
            fri = fdip->indata;
            fri->fh = fh_id;
            fri->flags = OFLAGS(mode);
@@ -675,7 +675,7 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
     op = FUSE_LOOKUP;
 
 calldaemon:
-    fdisp_make(&fdi, vnode_mount(dvp), op, nid, td, cred);
+    fdisp_make(&fdi, op, vnode_mount(dvp), nid, td, cred);
 
     if (op == FUSE_LOOKUP) {
         memcpy(fdi.indata, cnp->cn_nameptr, cnp->cn_namelen);

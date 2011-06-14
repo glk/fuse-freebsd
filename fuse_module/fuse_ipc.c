@@ -789,8 +789,8 @@ fuse_standard_handler(struct fuse_ticket *tick, struct uio *uio)
 
 void
 fdisp_make_pid(struct fuse_dispatcher *fdip,
-               struct mount *mp,
                enum fuse_opcode op,
+               struct mount *mp,
                uint64_t nid,
                pid_t pid,
                struct ucred *cred)
@@ -818,15 +818,15 @@ fdisp_make_pid(struct fuse_dispatcher *fdip,
 
 void
 fdisp_make(struct fuse_dispatcher *fdip,
-           struct mount *mp,
            enum fuse_opcode op,
+           struct mount *mp,
            uint64_t nid,
            struct thread *td,
            struct ucred *cred)
 {
     RECTIFY_TDCR(td, cred);
 
-    return (fdisp_make_pid(fdip, mp, op, nid, td->td_proc->p_pid, cred));
+    return (fdisp_make_pid(fdip, op, mp, nid, td->td_proc->p_pid, cred));
 }
 
 void
@@ -838,7 +838,7 @@ fdisp_make_vp(struct fuse_dispatcher *fdip,
 {
     debug_printf("fdip=%p, op=%d, vp=%p, context=%p\n", fdip, op, vp, context);
     RECTIFY_TDCR(td, cred);
-    return (fdisp_make_pid(fdip, vnode_mount(vp), op, VTOI(vp),
+    return (fdisp_make_pid(fdip, op, vnode_mount(vp), VTOI(vp),
             td->td_proc->p_pid, cred));
 }
 

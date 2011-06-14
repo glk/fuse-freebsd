@@ -303,7 +303,7 @@ fuse_vfs_unmount(struct mount *mp, int mntflags)
     }
 
     fdisp_init(&fdi, 0);
-    fdisp_make(&fdi, mp, FUSE_DESTROY, 0, td, NULL);
+    fdisp_make(&fdi, FUSE_DESTROY, mp, 0, td, NULL);
     err = fdisp_wait_answ(&fdi);
     if (!err) {
         fuse_ticket_drop(fdi.tick);

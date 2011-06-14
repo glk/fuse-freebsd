@@ -279,12 +279,12 @@ fdisp_init(struct fuse_dispatcher *fdisp, size_t iosize)
 }
 
 
-void fdisp_make(struct fuse_dispatcher *fdip, struct mount *mp,
-                enum fuse_opcode op, uint64_t nid, struct thread *td,
+void fdisp_make(struct fuse_dispatcher *fdip, enum fuse_opcode op,
+                struct mount *mp, uint64_t nid, struct thread *td,
                 struct ucred *cred);
 
-void fdisp_make_pid(struct fuse_dispatcher *fdip, struct mount *mp,
-                    enum fuse_opcode op, uint64_t nid, pid_t pid,
+void fdisp_make_pid(struct fuse_dispatcher *fdip, enum fuse_opcode op,
+                    struct mount *mp, uint64_t nid, pid_t pid,
                     struct ucred *cred);
 
 void fdisp_make_vp(struct fuse_dispatcher *fdip, enum fuse_opcode op,
@@ -307,7 +307,7 @@ fdisp_simple_vfs_statfs(struct fuse_dispatcher *fdip,
                          struct mount           *mp)
 {
    fdisp_init(fdip, 0);
-   fdisp_make(fdip, mp, FUSE_STATFS, FUSE_ROOT_ID, NULL, NULL);
+   fdisp_make(fdip, FUSE_STATFS, mp, FUSE_ROOT_ID, NULL, NULL);
    return (fdisp_wait_answ(fdip));
 }
 
