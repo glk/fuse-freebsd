@@ -160,6 +160,11 @@ fuse_vnode_get(struct mount         *mp,
         return err;
     }
 
+    if (dvp != NULL && vnode_vtype(*vpp) == VDIR) {
+	    MPASS((cnp->cn_flags & ISDOTDOT) == 0);
+	    MPASS(!(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'));
+	    VTOFUD(*vpp)->parent_nid = VTOI(dvp);
+    }
     if (cnp != NULL) {
         cache_enter(dvp, *vpp, cnp);
     }

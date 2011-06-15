@@ -601,11 +601,10 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
     int err                   = 0;
     int lookup_err            = 0;
     struct vnode *vp          = NULL;
-    struct vnode *pdp         = NULL;
     struct fuse_attr *fattr   = NULL;
     struct fuse_dispatcher fdi;
     enum fuse_opcode op;
-    uint64_t nid, parent_nid;
+    uint64_t nid;
     struct fuse_access_param facp;
     uint64_t size = 0;
 
@@ -638,15 +637,15 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
     }
 
     if (flags & ISDOTDOT) {
-        pdp = VTOFUD(dvp)->parent;
-        nid = VTOI(pdp);
-        parent_nid = VTOFUD(dvp)->parent_nid;
+        nid = VTOFUD(dvp)->parent_nid;
+        if (nid == 0) {
+            return ENOENT;
+        }
         fdisp_init(&fdi, 0);
         op = FUSE_GETATTR;
         goto calldaemon;
     } else if (cnp->cn_namelen == 1 && *(cnp->cn_nameptr) == '.') {
         nid = VTOI(dvp);
-        parent_nid = VTOFUD(dvp)->parent_nid;
         fdisp_init(&fdi, 0);
         op = FUSE_GETATTR;
         goto calldaemon;
@@ -670,7 +669,6 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
     }
 
     nid = VTOI(dvp);
-    parent_nid = VTOI(dvp);
     fdisp_init(&fdi, cnp->cn_namelen + 1);
     op = FUSE_LOOKUP;
 
@@ -867,8 +865,20 @@ calldaemon:
         }
 
         if (flags & ISDOTDOT) {
-            vref(pdp);
-            *vpp = pdp;
+            int ltype;
+
+            ltype = VOP_ISLOCKED(dvp);
+            VOP_UNLOCK(dvp, 0);
+            err = fuse_vnode_get(vnode_mount(dvp),
+                                 nid,
+                                 NULL,
+                                 &vp,
+                                 cnp,
+                                 IFTOVT(fattr->mode),
+                                 0);
+            vn_lock(dvp, ltype | LK_RETRY);
+            vref(vp);
+            *vpp = vp;
         } else if (nid == VTOI(dvp)) {
             vref(dvp);
             *vpp = dvp;
@@ -884,7 +894,7 @@ calldaemon:
                 goto out;
             }
             if (vnode_vtype(vp) == VDIR) {
-                VTOFUD(vp)->parent = dvp;
+                VTOFUD(vp)->parent_nid = VTOI(dvp);
                 //SETPARENT(vp, dvp);
             }
             *vpp = vp;

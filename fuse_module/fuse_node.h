@@ -41,9 +41,6 @@ struct fuse_vnode_data {
      */
     struct sx  truncatelock;
 
-    struct vnode *c_vp;
-    /* XXXIP reference is very likely to be stale, it's not updated in rename() */
-    struct vnode *parent;
     off_t      filesize; 
     off_t      newfilesize;
 
