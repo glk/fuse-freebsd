@@ -342,8 +342,6 @@ bringup:
 #endif
     }
 
-    cache_enter(dvp, *vpp, cnp);
-
     return (0);
 
 undo:
