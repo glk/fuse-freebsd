@@ -122,113 +122,39 @@ do {						\
 
 /* Debug related stuff */
 
-#ifndef DEBUGTOLOG
-#define DEBUGTOLOG 0
-#endif
-#if DEBUGTOLOG
-#define dprintf(args ...)  log(LOG_DEBUG, args)
-#else
-#define dprintf(args ...)  printf(args)
+#ifndef FUSE_DEBUG_DEVICE
+#define FUSE_DEBUG_DEVICE               0
 #endif
 
-#define DEBLABEL "[fuse-debug] "
-#ifndef _DEBUG
-#define _DEBUG 0
-#endif
-#if     _DEBUG
-#ifndef _DEBUG2G
-#define _DEBUG2G 1
-#endif
-#define DEBUG(args, ...)							\
-	printf(DEBLABEL "%s <%s@%d>: " args, __func__, __FILE__, __LINE__, ## __VA_ARGS__)
-#else
-#define DEBUG(args ...)
+#ifndef FUSE_DEBUG_FILE
+#define FUSE_DEBUG_FILE                 0
 #endif
 
-#ifndef _DEBUG2G
-#define _DEBUG2G 0
-#endif
-#if     _DEBUG2G
-#ifndef _DEBUG3G
-#define _DEBUG3G 1
-#endif
-#define DEBUG2G(args, ...)							\
-	printf(DEBLABEL "%s <%s@%d>: " args, __func__, __FILE__, __LINE__, ## __VA_ARGS__)
-#else
-#define DEBUG2G(args ...)
+#ifndef FUSE_DEBUG_INTERNAL
+#define FUSE_DEBUG_INTERNAL             0
 #endif
 
-#ifndef _DEBUG3G
-#define _DEBUG3G 0
-#endif
-#if     _DEBUG3G
-#define DEBUG3G(args, ...)							\
-	printf(DEBLABEL "%s <%s@%d>: " args, __func__, __FILE__, __LINE__, ## __VA_ARGS__)
-#else
-#define DEBUG3G(args ...)
+#ifndef FUSE_DEBUG_IO
+#define FUSE_DEBUG_IO                   0
 #endif
 
-#ifndef FMASTER
-#define FMASTER 0
-#endif
-#if     FMASTER
-#ifndef _DEBUG_MSG
-#define _DEBUG_MSG 1
-#endif
+#ifndef FUSE_DEBUG_IPC
+#define FUSE_DEBUG_IPC                  0
 #endif
 
-#ifndef _DEBUG_MSG
-#define _DEBUG_MSG 0
-#endif
-#if     _DEBUG_MSG
-#define DEBUG_MSG(args, ...)							\
-	printf(DEBLABEL "%s <%s@%d>: " args, __func__, __FILE__, __LINE__, ## __VA_ARGS__)
-#else
-#define DEBUG_MSG(args...)
+#ifndef FUSE_DEBUG_VFSOPS
+#define FUSE_DEBUG_VFSOPS               0
 #endif
 
-#ifndef _DEBUG_UNIQUE
-#if _DEBUG || _DEBUG2G || _DEBUG3G || _DEBUG_MSG
-#define _DEBUG_UNIQUE 1
-#else
-#define _DEBUG_UNIQUE 0
-#endif
+#ifndef FUSE_DEBUG_VNOPS
+#define FUSE_DEBUG_VNOPS                0
 #endif
 
-#ifdef FUSE_TRACE
-#define fuse_trace_printf(fmt, ...) printf(fmt, ## __VA_ARGS__)
-#define fuse_trace_printf_func()    printf("%s\n", __FUNCTION__)
-#else
-#define fuse_trace_printf(fmt, ...) {}
-#define fuse_trace_printf_func()    {}
+#ifndef FUSE_TRACE
+#define FUSE_TRACE                      0
 #endif
 
-#ifdef FUSE_TRACE_OP
-#define fuse_trace_printf_vfsop() printf("%s\n", __FUNCTION__)
-#define fuse_trace_printf_vnop()  printf("%s\n", __FUNCTION__)
-#else
-#define fuse_trace_printf_vfsop() {}
-#define fuse_trace_printf_vnop()  {}
-#endif
-
-#define debug_printf(fmt, ...) DEBUG(fmt, ## __VA_ARGS__)
-#define kdebug_printf(fmt, ...) DEBUG(fmt, ## __VA_ARGS__)
-
-#if _DEBUG || _DEBUG2G || _DEBUG3G || FMASTER
-extern char *fuse_opnames[];
-extern int fuse_opnames_entries;
-
-struct fuse_iov;
-
-void uprettyprint(char *buf, size_t len);
-void prettyprint(char *buf, size_t len);
-void fprettyprint(struct fuse_iov *fiov, size_t dlen);
-#endif
-
-#if _DEBUG || _DEBUG2G || _DEBUG3G
-#include <sys/kdb.h>
-
-#define bp_print(bp) \
-printf("b_bcount %d, b_data %p, b_error %#x, b_iocmd %#x, b_ioflags %#x, b_iooffset %lld, b_resid %d, b_blkno %d, b_offset %lld, b_flags %#x, b_bufsize %d, b_lblkno %d, b_vp %p, b_vp_ino %llu, b_dirtyoff %d, b_dirtyend %d, b_npages %d\n", \
-(int)(bp)->b_bcount, (bp)->b_data, (bp)->b_error, (bp)->b_iocmd, (bp)->b_ioflags, (long long)(bp)->b_iooffset, (int)(bp)->b_resid, (int)(bp)->b_blkno, (long long)(bp)->b_offset, (bp)->b_flags, (int)(bp)->b_bufsize, (int)(bp)->b_lblkno, (bp)->b_vp, VTOILLU((bp)->b_vp), (int)(bp)->b_dirtyoff, (int)(bp)->b_dirtyend, (int)(bp)->b_npages)
-#endif
+#define DEBUGX(cond, fmt, ...) do {                     \
+    if (((cond))) {                                     \
+        printf("%s: " fmt, __func__, ## __VA_ARGS__);   \
+    } } while (0)

@@ -28,6 +28,9 @@
 #include "fuse_ipc.h"
 #include "fuse_internal.h"
 
+#define FUSE_DEBUG_MODULE IPC
+#include "fuse_debug.h"
+
 static struct fuse_ticket *fticket_alloc(struct fuse_data *data);
 static void                fticket_refresh(struct fuse_ticket *tick);
 static void                fticket_destroy(struct fuse_ticket *tick);
@@ -73,7 +76,7 @@ MALLOC_DEFINE(M_FUSEMSG, "fuse_messaging",
 void
 fiov_init(struct fuse_iov *fiov, size_t size)
 {
-    debug_printf("fiov=%p, size=%x\n", fiov, size);
+    debug_printf("fiov=%p, size=%zd\n", fiov, size);
 
     fiov->len = 0;
     fiov->base = malloc(FU_AT_LEAST(size), M_FUSEMSG, M_WAITOK | M_ZERO);
@@ -92,7 +95,7 @@ fiov_teardown(struct fuse_iov *fiov)
 void
 fiov_adjust(struct fuse_iov *fiov, size_t size)
 {
-    debug_printf("fiov=%p, size=%x\n", fiov, size);
+    debug_printf("fiov=%p, size=%zd\n", fiov, size);
 
     if (fiov->allocated_size < size ||
         (fuse_iov_permanent_bufsize >= 0 &&
@@ -248,7 +251,7 @@ fticket_aw_pull_uio(struct fuse_ticket *tick, struct uio *uio)
             fiov_adjust(fticket_resp(tick), len);
             err = uiomove(fticket_resp(tick)->base, len, uio);
             if (err) {
-                debug_printf("FT_A_FIOV: error is %d (%p, %d, %p)\n",
+                debug_printf("FT_A_FIOV: error is %d (%p, %zd, %p)\n",
                              err, fticket_resp(tick)->base, len, uio);
             }
             break;
@@ -257,7 +260,7 @@ fticket_aw_pull_uio(struct fuse_ticket *tick, struct uio *uio)
             tick->tk_aw_bufsize = len;
             err = uiomove(tick->tk_aw_bufdata, len, uio);
             if (err) {
-                debug_printf("FT_A_BUF: error is %d (%p, %d, %p)\n",
+                debug_printf("FT_A_BUF: error is %d (%p, %zd, %p)\n",
                              err, tick->tk_aw_bufdata, len, uio);
             }
             break;
@@ -294,7 +297,7 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
 {
     struct fuse_data *data;
 
-    debug_printf("fdev=%p, p=%p\n", fdev, p);
+    debug_printf("fdev=%p\n", fdev);
 
     data = malloc(sizeof(struct fuse_data), M_FUSEMSG, M_WAITOK | M_ZERO);
 
@@ -304,7 +307,7 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
     mtx_init(&data->ms_mtx, "fuse message list mutex", NULL, MTX_DEF);
     STAILQ_INIT(&data->ms_head);
     mtx_init(&data->ticket_mtx, "fuse ticketer mutex", NULL, MTX_DEF);
-    debug_printf("ALLOC_INIT data=%p ticket_mtx=%p\n", data, data->ticket_mtx);
+    debug_printf("ALLOC_INIT data=%p ticket_mtx=%p\n", data, &data->ticket_mtx);
     STAILQ_INIT(&data->freetickets_head);
     TAILQ_INIT(&data->alltickets_head);
     mtx_init(&data->aw_mtx, "fuse answer list mutex", NULL, MTX_DEF);
@@ -558,7 +561,7 @@ fuse_body_audit(struct fuse_ticket *tick, size_t blen)
     int err = 0;
     enum fuse_opcode opcode;
 
-    debug_printf("tick=%p, blen = %x\n", tick, blen);
+    debug_printf("tick=%p, blen = %zu\n", tick, blen);
 
     opcode = fticket_opcode(tick);
 
@@ -740,8 +743,8 @@ fuse_setup_ihead(struct fuse_in_header *ihead,
     ihead->nodeid = nid;
     ihead->opcode = op;
 
-    debug_printf("ihead=%p, tick=%p, nid=%llx, op=%d, blen=%x, context=%p\n",
-                 ihead, tick, nid, op, blen, context);
+    debug_printf("ihead=%p, tick=%p, nid=%ju, op=%d, blen=%zu\n",
+                 ihead, tick, (uintmax_t)nid, op, blen);
 
     ihead->pid = pid;
     ihead->uid = cred->cr_uid;
@@ -797,8 +800,8 @@ fdisp_make_pid(struct fuse_dispatcher *fdip,
 {
     struct fuse_data *data = fusefs_get_data(mp);
 
-    debug_printf("fdip=%p, op=%d, mp=%p, nid=%llx, context=%p\n",
-                 op, mp, nid, context);
+    debug_printf("fdip=%p, op=%d, mp=%p, nid=%ju\n",
+                 fdip, op, mp, (uintmax_t)nid);
 
     if (fdip->tick) {
         fticket_refresh(fdip->tick);
@@ -836,7 +839,7 @@ fdisp_make_vp(struct fuse_dispatcher *fdip,
               struct thread *td,
               struct ucred *cred)
 {
-    debug_printf("fdip=%p, op=%d, vp=%p, context=%p\n", fdip, op, vp, context);
+    debug_printf("fdip=%p, op=%d, vp=%p\n", fdip, op, vp);
     RECTIFY_TDCR(td, cred);
     return (fdisp_make_pid(fdip, op, vnode_mount(vp), VTOI(vp),
             td->td_proc->p_pid, cred));

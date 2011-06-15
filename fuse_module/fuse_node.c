@@ -34,6 +34,9 @@
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
 
+#define FUSE_DEBUG_MODULE VNOPS
+#include "fuse_debug.h"
+
 MALLOC_DEFINE(M_FUSEVN, "fuse_vnode", "fuse vnode private data");
 
 static void

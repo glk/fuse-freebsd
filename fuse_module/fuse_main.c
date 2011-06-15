@@ -115,7 +115,8 @@ fuse_loader(struct module *m, int what, void *arg)
 		KASSERT(fuse_useco >= 0,
 		        ("fuse_useco is negative: %d", fuse_useco));
 		if (fuse_useco > 0) {
-			DEBUG2G("fuse_useco %d\n", fuse_useco);
+			DEBUGX(FUSE_DEBUG_INTERNAL,
+                            "fuse_useco %d\n", fuse_useco);
 		        return (EBUSY);
 		}
 

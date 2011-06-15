@@ -46,6 +46,9 @@
 
 #include <sys/priv.h>
 
+#define FUSE_DEBUG_MODULE VNOPS
+#include "fuse_debug.h"
+
 /* vnode ops */
 static vop_access_t   fuse_vnop_access;
 static vop_close_t    fuse_vnop_close;
@@ -242,7 +245,7 @@ fuse_vnop_create(struct vop_create_args *ap)
         goto good_old;
     }
 
-    debug_printf("parent nid = %llu, mode = %x\n", parentnid, mode);
+    debug_printf("parent nid = %ju, mode = %x\n", (uintmax_t)parentnid, mode);
 
     fdisp_init(fdip, sizeof(*foi) + cnp->cn_namelen + 1);
     if (fusefs_get_data(vnode_mount(dvp))->dataflag & FSESS_NOCREATE) {

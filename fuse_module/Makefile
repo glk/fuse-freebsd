@@ -32,10 +32,6 @@ KERNCONFDIR= ${KRNLOBJDIR}/${KERNCONF1}
 CFLAGS+= -DKERNCONFDIR="\"${KERNCONFDIR}\"" -I${KERNCONFDIR}
 .endif
 
-.if defined(DEBUG_MSG)
-DEBUG_FLAGS+= -D_DEBUG_MSG
-.endif
-
 KMOD=fuse
 
 .include <bsd.kmod.mk>

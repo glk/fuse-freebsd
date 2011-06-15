@@ -41,6 +41,9 @@
 #include "fuse_file.h"
 #include "fuse_param.h"
 
+#define FUSE_DEBUG_MODULE INTERNAL
+#include "fuse_debug.h"
+
 #ifdef ZERO_PAD_INCOMPLETE_BUFS
 static int isbzero(void *buf, size_t len);
 #endif
@@ -474,7 +477,7 @@ fuse_internal_newentry_makerequest(struct mount *mp,
                                    size_t bufsize,
                                    struct fuse_dispatcher *fdip)
 {
-    debug_printf("fdip=%p, context=%p\n", fdip, context);
+    debug_printf("fdip=%p\n", fdip);
 
     fdip->iosize = bufsize + cnp->cn_namelen + 1;
 
@@ -572,8 +575,8 @@ fuse_internal_forget_send(struct mount *mp,
 {
     struct fuse_forget_in *ffi;
 
-    debug_printf("mp=%p, nodeid=%llx, nlookup=%lld, fdip=%p\n",
-                 mp, nodeid, nlookup, fdip);
+    debug_printf("mp=%p, nodeid=%jd, nlookup=%jd, fdip=%p\n",
+                 mp, (uintmax_t)nodeid, (uintmax_t)nlookup, fdip);
 
     /*
      * KASSERT(nlookup > 0, ("zero-times forget for vp #%llu",

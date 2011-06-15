@@ -114,7 +114,8 @@ fuse_internal_attr_fat2vat(struct mount *mp,
                            struct fuse_attr *fat,
                            struct vattr *vap)
 {
-    DEBUG("node #%llu, mode 0%o\n", (unsigned long long)fat->ino, fat->mode);
+    DEBUGX(FUSE_DEBUG_INTERNAL,
+        "node #%ju, mode 0%o\n", (uintmax_t)fat->ino, fat->mode);
 
     vattr_null(vap);
 
@@ -222,20 +223,24 @@ static __inline
 int
 fuse_internal_checkentry(struct fuse_entry_out *feo, enum vtype vtyp)
 {
-    debug_printf("feo=%p, vtype=%d\n", feo, vtyp);
+    DEBUGX(FUSE_DEBUG_INTERNAL,
+        "feo=%p, vtype=%d\n", feo, vtyp);
 
     if (vtyp != IFTOVT(feo->attr.mode)) {
-        debug_printf("EINVAL -- %x != %x\n", vtype, IFTOVT(feo->attr.mode));
+        DEBUGX(FUSE_DEBUG_INTERNAL,
+            "EINVAL -- %x != %x\n", vtyp, IFTOVT(feo->attr.mode));
         return (EINVAL);
     }
 
     if (feo->nodeid == FUSE_NULL_ID) {
-        debug_printf("EINVAL -- feo->nodeid is NULL\n");
+        DEBUGX(FUSE_DEBUG_INTERNAL,
+            "EINVAL -- feo->nodeid is NULL\n");
         return (EINVAL);
     }
 
     if (feo->nodeid == FUSE_ROOT_ID) {
-        debug_printf("EINVAL -- feo->nodeid is FUSE_ROOT_ID\n");
+        DEBUGX(FUSE_DEBUG_INTERNAL,
+            "EINVAL -- feo->nodeid is FUSE_ROOT_ID\n");
         return (EINVAL);
     }
 

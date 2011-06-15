@@ -29,6 +29,8 @@
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
 
+#define FUSE_DEBUG_MODULE VFSOPS
+#include "fuse_debug.h"
 
 /* This will do for privilege types for now */
 #ifndef PRIV_VFS_FUSE_ALLOWOTHER

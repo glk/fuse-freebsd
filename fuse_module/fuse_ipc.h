@@ -69,35 +69,35 @@ struct fuse_ticket {
 static __inline struct fuse_iov *
 fticket_resp(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     return (&tick->tk_aw_fiov);
 }
 
 static __inline int
 fticket_answered(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     return (tick->tk_flag & FT_ANSW);
 }
 
 static __inline void
 fticket_set_answered(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     tick->tk_flag |= FT_ANSW;
 }
 
 static __inline enum fuse_opcode
 fticket_opcode(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     return (((struct fuse_in_header *)(tick->tk_ms_fiov.base))->opcode);
 }
 
 static __inline void
 fticket_invalidate(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     tick->tk_flag |= FT_INVAL;
 }
 
@@ -171,14 +171,14 @@ static __inline struct fuse_data *
 fusefs_get_data(struct mount *mp)
 {
     struct fuse_data *data = mp->mnt_data;
-    kdebug_printf("-> mp=%p\n", mp);
+    DEBUGX(FUSE_DEBUG_IPC, "-> mp=%p\n", mp);
     return (data->mpri == FM_PRIMARY ? data : NULL);
 }
 
 static __inline void
 fuse_ms_push(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     STAILQ_INSERT_TAIL(&tick->tk_data->ms_head, tick, tk_ms_link);
 }
 
@@ -187,7 +187,7 @@ fuse_ms_pop(struct fuse_data *data)
 {
     struct fuse_ticket *tick;
 
-    kdebug_printf("-> data=%p\n", data);
+    DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
 
     if ((tick = STAILQ_FIRST(&data->ms_head))) {
         STAILQ_REMOVE_HEAD(&data->ms_head, tk_ms_link);
@@ -199,14 +199,14 @@ fuse_ms_pop(struct fuse_data *data)
 static __inline void
 fuse_aw_push(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     TAILQ_INSERT_TAIL(&tick->tk_data->aw_head, tick, tk_aw_link);
 }
 
 static __inline void
 fuse_aw_remove(struct fuse_ticket *tick)
 {
-    kdebug_printf("-> tick=%p\n", tick);
+    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
     TAILQ_REMOVE(&tick->tk_data->aw_head, tick, tk_aw_link);
 }
 
@@ -215,7 +215,7 @@ fuse_aw_pop(struct fuse_data *data)
 {
     struct fuse_ticket *tick;
 
-    kdebug_printf("-> data=%p\n", data);
+    DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
 
     if ((tick = TAILQ_FIRST(&data->aw_head))) {
         fuse_aw_remove(tick);
@@ -273,7 +273,7 @@ struct fuse_dispatcher {
 static __inline void
 fdisp_init(struct fuse_dispatcher *fdisp, size_t iosize)
 {
-    kdebug_printf("-> fdisp=%p, iosize=%x\n", fdisp, iosize);
+    DEBUGX(FUSE_DEBUG_IPC, "-> fdisp=%p, iosize=%zx\n", fdisp, iosize);
     fdisp->iosize = iosize;
     fdisp->tick = NULL;
 }
@@ -296,7 +296,7 @@ static __inline int
 fdisp_simple_putget_vp(struct fuse_dispatcher *fdip, enum fuse_opcode op,
                     struct vnode *vp, struct thread *td, struct ucred *cred)
 {
-    kdebug_printf("-> fdip=%p, opcode=%d, vp=%p\n", fdip, op, vp);
+    DEBUGX(FUSE_DEBUG_IPC, "-> fdip=%p, opcode=%d, vp=%p\n", fdip, op, vp);
     fdisp_init(fdip, 0);
     fdisp_make_vp(fdip, op, vp, td, cred);
     return (fdisp_wait_answ(fdip));

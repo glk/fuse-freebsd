@@ -28,6 +28,9 @@
 #include "fuse.h"
 #include "fuse_ipc.h"
 
+#define FUSE_DEBUG_MODULE DEVICE
+#include "fuse_debug.h"
+
 static __inline int fuse_ohead_audit(struct fuse_out_header *ohead,
                                      struct uio *uio);
 
@@ -104,7 +107,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 #if DO_GIANT_MANUALLY 
 		mtx_unlock(&Giant);
 #endif
-		DEBUG2G("caught in the middle of unload\n");
+		DEBUG("caught in the middle of unload\n");
 		return (ENOENT);
 	}
 #if DO_GIANT_MANUALLY && USE_FUSE_LOCK
@@ -115,7 +118,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 	if (dev->si_usecount > 1)
 		goto busy;
 
-	DEBUG2G("device %p\n", dev);
+	DEBUG("device %p\n", dev);
 
 	fdata = fdata_alloc(dev, td->td_ucred);
 
@@ -136,7 +139,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 	mtx_unlock(&Giant);
 #endif
 
-	DEBUG("Opened device \"fuse\" (that of minor %d) successfully on thread %d.\n", minor(dev), td->td_tid);
+	DEBUG("%s: device opened by thread %d.\n", dev->si_name, td->td_tid);
 
 	return(0);
 
@@ -172,7 +175,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 	/* wakup poll()ers */
 	selwakeuppri(&data->ks_rsel, PZERO + 1);
 
-	DEBUG2G("mntco %d\n", data->mntco);
+	DEBUG("mntco %d\n", data->mntco);
 	if (data->mntco > 0) {
 		struct fuse_ticket *tick;
 
@@ -200,7 +203,7 @@ out:
 #endif
 	fuse_useco--;
 	
-	DEBUG("Closing device \"fuse\" (that of minor %d) on thread %d.\n", minor(dev), td->td_tid);
+	DEBUG("%s: device closed by thread %d.\n", dev->si_name, td->td_tid);
 	return(0);
 }
 
@@ -245,7 +248,7 @@ fuse_device_read(struct cdev *dev, struct uio *uio, int ioflag)
 
 	data = fusedev_get_data(dev);
 
-	DEBUG_MSG("fuse device being read on thread %d\n", uio->uio_td->td_tid);
+	DEBUG("fuse device being read on thread %d\n", uio->uio_td->td_tid);
 
 	mtx_lock(&data->ms_mtx);
 again:
@@ -351,17 +354,17 @@ again:
 static __inline int
 fuse_ohead_audit(struct fuse_out_header *ohead, struct uio *uio)
 {
-	DEBUG_MSG("Out header -- len: %i, error: %i, unique: %llu; iovecs: %d\n",
+	DEBUG("Out header -- len: %i, error: %i, unique: %llu; iovecs: %d\n",
 	          ohead->len, ohead->error, (unsigned long long)ohead->unique,
                   uio->uio_iovcnt);
 
 	if (uio->uio_resid + sizeof(struct fuse_out_header) != ohead->len) {
-		DEBUG_MSG("Format error: body size differs from size claimed by header\n");
+		DEBUG("Format error: body size differs from size claimed by header\n");
 		return (EINVAL);
 	}
 
 	if (uio->uio_resid && ohead->error) {
-		DEBUG_MSG("Format error: non zero error but message had a body\n");
+		DEBUG("Format error: non zero error but message had a body\n");
 		return (EINVAL);
 	}
 
@@ -380,22 +383,19 @@ fuse_ohead_audit(struct fuse_out_header *ohead, struct uio *uio)
 static int
 fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 {
-#if _DEBUG_MSG
-	static int counter=0;
-#endif
 	struct fuse_out_header ohead;
 	int err = 0;
 	struct fuse_data *data;
 	struct fuse_ticket *tick, *x_tick;
 	int found = 0;
 
-	DEBUG_MSG("Fuse write -- No: %d, resid: %d, iovcnt: %d, thread: %d\n",
-		++counter, uio->uio_resid, uio->uio_iovcnt, uio->uio_td->td_tid);
+	DEBUG("Fuse write -- resid: %zd, iovcnt: %d, thread: %d\n",
+		uio->uio_resid, uio->uio_iovcnt, uio->uio_td->td_tid);
 
 	data = fusedev_get_data(dev);
 
 	if (uio->uio_resid < sizeof(struct fuse_out_header)) {
-		DEBUG_MSG("got less than a header!\n");
+		DEBUG("got less than a header!\n");
 		fdata_kick_set(data);
 		return (EINVAL);
 	}
@@ -421,7 +421,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 	mtx_lock(&data->aw_mtx);
 	TAILQ_FOREACH_SAFE(tick, &data->aw_head, tk_aw_link,
 	                   x_tick) {
-		DEBUG_MSG("bumped into callback #%llu\n",
+		DEBUG("bumped into callback #%llu\n",
                          (unsigned long long)tick->tk_unique);
 		if (tick->tk_unique == ohead.unique) {
 			found = 1;
@@ -442,10 +442,10 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 			 */
 			memcpy(&tick->tk_aw_ohead, &ohead, sizeof(ohead));
 			err = tick->tk_aw_handler(tick, uio);
-			DEBUG_MSG("stuff been passed over to a callback\n");
+			DEBUG("stuff been passed over to a callback\n");
 		} else {
 			/* pretender doesn't wanna do anything with answer */
-			DEBUG_MSG("stuff devalidated, so we drop it\n");
+			DEBUG("stuff devalidated, so we drop it\n");
 			fuse_ticket_drop(tick);
 			return (err);
 		}
@@ -471,7 +471,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 		 *       		  would be the place for such a thing),
 		 *       		   which is just nonsense.
 		 */
-		DEBUG_MSG("erhm, no handler for this response\n");
+		DEBUG("erhm, no handler for this response\n");
 
 		fdata_kick_set(data);
 		return (EINVAL);

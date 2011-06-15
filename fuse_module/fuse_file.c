@@ -29,6 +29,9 @@
 #include "fuse_ipc.h"
 #include "fuse_node.h"
 
+#define FUSE_DEBUG_MODULE FILE
+#include "fuse_debug.h"
+
 static uint64_t fuse_fh_upcall_count = 0;
 SYSCTL_QUAD(_vfs_fuse, OID_AUTO, fh_upcall_count, CTLFLAG_RD,
             &fuse_fh_upcall_count, 0, "");

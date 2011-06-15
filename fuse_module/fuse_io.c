@@ -41,6 +41,9 @@
 #include "fuse_ipc.h"
 #include "fuse_io.h"
 
+#define FUSE_DEBUG_MODULE IO
+#include "fuse_debug.h"
+
 static int fuse_read_directbackend(struct fuse_io_data *fioda);
 static int fuse_io_p2p(struct fuse_io_data *fioda, struct fuse_dispatcher *fdip);
 static int fuse_read_biobackend(struct fuse_io_data *fioda);
@@ -140,21 +143,21 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
         fioda.buffeater = fuse_std_buffeater;
 
         if (directio) {
-            DEBUG2G("direct read of vnode %llu via file handle %llu\n",
-                VTOILLU(vp), (unsigned long long)fufh->fh_id);
+            DEBUG2G("direct read of vnode %ju via file handle %ju\n",
+                (uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);
             err = fuse_read_directbackend(&fioda);
         } else {
-            DEBUG2G("buffered read of vnode %llu\n", VTOILLU(vp));
+            DEBUG2G("buffered read of vnode %ju\n", (uintmax_t)VTOILLU(vp));
             err = fuse_read_biobackend(&fioda);
         }
         break;
     case UIO_WRITE:
         if (directio) {
-            DEBUG2G("direct write of vnode %llu via file handle %llu\n",
-                VTOILLU(vp), (unsigned long long)fufh->fh_id);
+            DEBUG2G("direct write of vnode %ju via file handle %ju\n",
+                (uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);
             err = fuse_write_directbackend(&fioda);
         } else {
-            DEBUG2G("buffered write of vnode %llu\n", VTOILLU(vp));
+            DEBUG2G("buffered write of vnode %ju\n", (uintmax_t)VTOILLU(vp));
             err = fuse_write_biobackend(&fioda);
         }
         break;
@@ -249,12 +252,6 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
             bp->b_iocmd = BIO_READ;
             vfs_busy_pages(bp, 0);
             err = fuse_io_strategy(vp, bp, fufh, op);
-#if _DEBUG
-            prettyprint(bp->b_data, 48);
-            printf("\n");
-            prettyprint(bp->b_data + PAGE_SIZE, 48);
-            printf("\n");
-#endif
             if (err) {
                 brelse(bp);
                 return (err);
@@ -288,7 +285,7 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
                 param);
         }
         brelse(bp);
-        DEBUG2G("end of turn, err %d, uio->uio_resid %d, n %d\n",
+        DEBUG2G("end of turn, err %d, uio->uio_resid %zd, n %d\n",
             err, uio->uio_resid, n);
     } while (err == 0 && uio->uio_resid > 0 && n > 0);
 
@@ -342,13 +339,13 @@ fuse_read_directbackend(struct fuse_io_data *fioda)
         fri->size = MIN(uio->uio_resid,
             fusefs_get_data(vp->v_mount)->max_read);
 
-        DEBUG2G("fri->fh %llu, fri->offset %d, fri->size %d\n",
-            (unsigned long long)fri->fh, (int)fri->offset, fri->size);
+        DEBUG2G("fri->fh %ju, fri->offset %ju, fri->size %ju\n",
+            (uintmax_t)fri->fh, (uintmax_t)fri->offset, (uintmax_t)fri->size);
         if ((err = fdisp_wait_answ(&fdi)))
             goto out;
 
-        DEBUG2G("%d bytes asked for from offset %d, passing on the %d we got\n",
-            uio->uio_resid, (int)uio->uio_offset, (int)fdi.iosize);
+        DEBUG2G("%zd bytes asked for from offset %ju, passing on the %jd we got\n",
+            uio->uio_resid, (uintmax_t)uio->uio_offset, (uintmax_t)fdi.iosize);
 
         if ((err = buffe(uio, fri->size, fdi.answ, fdi.iosize, param)))
             break;
@@ -433,9 +430,9 @@ fuse_io_p2p(struct fuse_io_data *fioda, struct fuse_dispatcher *fdip)
             iov++;
             uio->uio_iovcnt--;
         }
-        DEBUG2G("resid %d, offset %llu, iovcnt %d, iov_len %d, "
+        DEBUG2G("resid %zd, offset %ju, iovcnt %d, iov_len %zd, "
             "transfersize %d\n",
-            uio->uio_resid, (long long unsigned)uio->uio_offset,
+            uio->uio_resid, (uintmax_t)uio->uio_offset,
             uio->uio_iovcnt, iov->iov_len, transfersize);
 
         if (transfersize < chunksize)
@@ -558,8 +555,8 @@ fuse_write_biobackend(struct fuse_io_data *fioda)
         on = uio->uio_offset & (biosize-1);
         n = MIN((unsigned)(biosize - on), uio->uio_resid);
 
-        DEBUG2G("lbn %d, on %d, n %d, uio offset %d, uio resid %d\n",
-            (int)lbn, on, n, (int)uio->uio_offset, uio->uio_resid);
+        DEBUG2G("lbn %ju, on %d, n %d, uio offset %ju, uio resid %zd\n",
+            (uintmax_t)lbn, on, n, (uintmax_t)uio->uio_offset, uio->uio_resid);
 
 again:
         /*
@@ -756,14 +753,14 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
     int biosize = vp->v_mount->mnt_stat.f_iosize;
 
     if (! (vp->v_type == VREG || vp->v_type == VDIR)) {
-        DEBUG("for vnode #%llu v_type is %d, dropping\n",
-            VTOILLU(vp), vp->v_type);
+        DEBUG("for vnode #%ju v_type is %d, dropping\n",
+            (uintmax_t)VTOILLU(vp), vp->v_type);
         return (EOPNOTSUPP);
     }
 
     if (bp->b_iocmd != BIO_READ && bp->b_iocmd != BIO_WRITE) {
-        DEBUG("for vnode #%llu bio tried with biocmd %#x, dropping\n",
-            VTOILLU(vp), bp->b_iocmd);
+        DEBUG("for vnode #%ju bio tried with biocmd %#x, dropping\n",
+            (uintmax_t)VTOILLU(vp), bp->b_iocmd);
         return (EOPNOTSUPP);
     }
 
@@ -791,7 +788,8 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
     }
     fufh->fufh_flags |= FUFH_STRATEGY;
 
-    DEBUG2G("vp #%llu, fufh #%llu\n", VTOILLU(vp), (unsigned long long)fufh->fh_id);
+    DEBUG2G("vp #%ju, fufh #%ju\n",
+	(uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);
 
     fdisp_init(&fdi, 0);
 
