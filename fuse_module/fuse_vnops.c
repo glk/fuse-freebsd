@@ -254,7 +254,7 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     foi = fdip->indata;
     foi->mode = mode;
-    foi->flags = O_RDWR; // XXX: We /always/ creat() like this.
+    foi->flags = O_CREAT | O_RDWR;
 
     memcpy((char *)fdip->indata + sizeof(*foi), cnp->cn_nameptr,
            cnp->cn_namelen);
