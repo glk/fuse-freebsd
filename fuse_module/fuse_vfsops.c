@@ -293,7 +293,7 @@ fuse_vfs_unmount(struct mount *mp, int mntflags)
     }
 
     /* There is 1 extra root vnode reference (mp->mnt_data). */
-    err = vflush(mp, 1, flags, td);
+    err = vflush(mp, 0, flags, td);
     if (err) {
         debug_printf("vflush failed");
         return (err);
