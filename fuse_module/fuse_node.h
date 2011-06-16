@@ -21,7 +21,7 @@ struct fuse_vnode_data {
     uint64_t   parent_nid;
 
     struct mtx createlock;
-    void      *creator;
+    lwpid_t    creator;
     /* XXX: Clean up this multi-flag nonsense. Really. */
     int        flag;
     int        flags;

@@ -46,6 +46,7 @@ fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     }
     vp->v_type = vtyp;
     vp->v_data = fvdat;
+    fvdat->creator = curthread->td_tid;
     mtx_init(&fvdat->createlock, "fuse node create mutex", NULL, MTX_DEF);
     sx_init(&fvdat->nodelock, "fuse node sx lock");
     sx_init(&fvdat->truncatelock, "fuse node truncate sx lock");

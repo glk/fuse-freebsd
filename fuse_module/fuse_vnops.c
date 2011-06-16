@@ -1112,7 +1112,7 @@ fuse_vnop_open(struct vop_open_args *ap)
         mtx_lock(&fvdat->createlock);
 
         if (fvdat->flag & FN_CREATING) { // check again
-            if (fvdat->creator == curthread) {
+            if (fvdat->creator == curthread->td_tid) {
 
                 /*
                  * For testing the race condition we want to prevent here,
@@ -1139,11 +1139,11 @@ fuse_vnop_open(struct vop_open_args *ap)
                 fvdat->flag &= ~FN_CREATING;
 
                 mtx_unlock(&fvdat->createlock);
-                wakeup((caddr_t)fvdat->creator); // wake up all
+                wakeup((caddr_t)&fvdat->creator); // wake up all
                 goto ok; /* return 0 */
             } else {
                 printf("contender going to sleep\n");
-                error = msleep(fvdat->creator, &fvdat->createlock,
+                error = msleep(&fvdat->creator, &fvdat->createlock,
                                PDROP | PINOD | PCATCH, "fuse_open", 0);
                 /*
                  * msleep will drop the mutex. since we have PDROP specified,
