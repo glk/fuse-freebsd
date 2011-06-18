@@ -1442,18 +1442,38 @@ fuse_vnop_rename(struct vop_rename_args *ap)
         panic("fuse_vnop_rename(): called on a dead file system");
     }
 
+    if (fvp->v_mount != tdvp->v_mount ||
+        (tvp && fvp->v_mount != tvp->v_mount)) {
+        DEBUG("cross-device rename: %s -> %s\n",
+	    fcnp->cn_nameptr, (tcnp != NULL ? tcnp->cn_nameptr : "(NULL)"));
+        err = EXDEV;
+        goto out;
+    }
+
     cache_purge(fvp);
 
+    /*
+     * FUSE library is expected to check if target directory is not
+     * under the source directory in the file system tree.
+     * Linux performs this check at VFS level.
+     */
     err = fuse_internal_rename(fdvp, fcnp, tdvp, tcnp);
 
-    if (tvp != NULLVP) {
-        if (tvp != fvp) {
-            cache_purge(tvp);
-        }
-        if (err == 0) {
-            vrecycle(tvp, tcnp->cn_thread);
-        }
+    if (tvp != NULL && tvp != fvp) {
+        cache_purge(tvp);
     }
+
+out:
+    if (tdvp == tvp) {
+        vrele(tdvp);
+    } else {
+        vput(tdvp);
+    }
+    if (tvp != NULL) {
+        vput(tvp);
+    }
+    vrele(fdvp);
+    vrele(fvp);
 
     return err;
 }
