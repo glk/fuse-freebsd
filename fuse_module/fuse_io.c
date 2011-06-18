@@ -112,7 +112,7 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
 
     err = fuse_io_filehandle_get(vp, (uio->uio_rw == UIO_READ),
         cred, &fufh);
-    if (!err)
+    if (err)
         return (err);
 
     bzero(&fioda, sizeof(fioda));

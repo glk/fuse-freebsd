@@ -1169,6 +1169,11 @@ fuse_vnop_open(struct vop_open_args *ap)
     }
 
 ok:
+    if (vnode_vtype(vp) == VREG) {
+        /* XXXIP prevent getattr, by using cached node size */
+        vnode_create_vobject(vp, 0, td);
+    }
+
     {
         /*
          * Doing this here because when a vnode goes inactive, no-cache and
