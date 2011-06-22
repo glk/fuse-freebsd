@@ -42,7 +42,6 @@ struct fuse_vnode_data {
     struct sx  truncatelock;
 
     off_t      filesize; 
-    off_t      newfilesize;
 
     struct     fuse_filehandle fufh[3];
 
