@@ -148,7 +148,7 @@ struct fuse_data {
     struct selinfo ks_rsel;
 };
 
-#define FSESS_KICK                0x0001 // session is to be closed
+#define FSESS_DEAD                0x0001 // session is to be closed
 #define FSESS_OPENED              0x0002 // session device has been opened
 #define FSESS_NOFSYNC             0x0004 // daemon doesn't implement fsync
 #define FSESS_NOFSYNCDIR          0x0008 // daemon doesn't implement fsyncdir
@@ -168,14 +168,14 @@ struct fuse_data {
 
 static __inline__
 struct fuse_data *
-fusedev_get_data(struct cdev *fdev)
+fuse_get_devdata(struct cdev *fdev)
 {
 	return (fdev->si_drv1);
 }
 
 static __inline__
 struct fuse_data *
-fusefs_get_data(struct mount *mp)
+fuse_get_mpdata(struct mount *mp)
 {
     struct fuse_data *data = mp->mnt_data;
     DEBUGX(FUSE_DEBUG_IPC, "-> mp=%p\n", mp);
@@ -252,8 +252,8 @@ fuse_libabi_geq(struct fuse_data *data, uint32_t abi_maj, uint32_t abi_min)
 
 struct fuse_data *fdata_alloc(struct cdev *dev, struct ucred *cred);
 void fdata_destroy(struct fuse_data *data);
-int fdata_kick_get(struct fuse_data *data);
-void fdata_kick_set(struct fuse_data *data);
+int fdata_get_dead(struct fuse_data *data);
+void fdata_set_dead(struct fuse_data *data);
 
 struct fuse_dispatcher {
 

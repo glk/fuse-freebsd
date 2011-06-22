@@ -337,7 +337,7 @@ fuse_read_directbackend(struct fuse_io_data *fioda)
         fri->fh = fufh->fh_id;
         fri->offset = uio->uio_offset;
         fri->size = MIN(uio->uio_resid,
-            fusefs_get_data(vp->v_mount)->max_read);
+            fuse_get_mpdata(vp->v_mount)->max_read);
 
         DEBUG2G("fri->fh %ju, fri->offset %ju, fri->size %ju\n",
             (uintmax_t)fri->fh, (uintmax_t)fri->offset, (uintmax_t)fri->size);
@@ -373,8 +373,8 @@ fuse_io_p2p(struct fuse_io_data *fioda, struct fuse_dispatcher *fdip)
     int chunksize = 0;
     struct iovec *iov;
     int nmax = (uio->uio_rw == UIO_READ) ?
-      fusefs_get_data(vp->v_mount)->max_read :
-      fusefs_get_data(vp->v_mount)->max_write;
+      fuse_get_mpdata(vp->v_mount)->max_read :
+      fuse_get_mpdata(vp->v_mount)->max_write;
 
     op = fioda->opcode ?:
       ((uio->uio_rw == UIO_READ) ? FUSE_READ : FUSE_WRITE);
@@ -487,7 +487,7 @@ fuse_write_directbackend(struct fuse_io_data *fioda)
 
     while (uio->uio_resid > 0) {
         chunksize = MIN(uio->uio_resid,
-            fusefs_get_data(vp->v_mount)->max_write);
+            fuse_get_mpdata(vp->v_mount)->max_write);
 
         fdi.iosize = sizeof(*fwi) + chunksize;
         fdisp_make_vp(&fdi, FUSE_WRITE, vp, td, cred);
@@ -808,7 +808,7 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
         while (bp->b_resid > 0) {
             DEBUG2G("starting bio with resid %ld\n", bp->b_resid);	
             chunksize = MIN(bp->b_resid,
-                fusefs_get_data(vp->v_mount)->max_read);
+                fuse_get_mpdata(vp->v_mount)->max_read);
             fdi.iosize = sizeof(*fri);
             if (! op)
                 op = vp->v_type == VDIR ? FUSE_READDIR : FUSE_READ;
@@ -878,7 +878,7 @@ eval:
         bufdat = bp->b_data + bp->b_dirtyoff;
         while (bp->b_dirtyend > bp->b_dirtyoff) {
             chunksize = MIN(bp->b_dirtyend - bp->b_dirtyoff,
-                fusefs_get_data(vp->v_mount)->max_write);
+                fuse_get_mpdata(vp->v_mount)->max_write);
 
             fdi.iosize = sizeof(*fwi);
             op = op ?: FUSE_WRITE;

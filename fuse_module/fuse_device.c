@@ -123,7 +123,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 	fdata = fdata_alloc(dev, td->td_ucred);
 
 	FUSE_LOCK();
-	if (fusedev_get_data(dev)) {
+	if (fuse_get_devdata(dev)) {
 		FUSE_UNLOCK();
 		fdata_destroy(fdata);
 		goto busy;
@@ -163,12 +163,12 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 	mtx_lock(&Giant);
 #endif
 	FUSE_LOCK();
-	data = fusedev_get_data(dev);
+	data = fuse_get_devdata(dev);
 	if (! data)
 		panic("no fuse data upon fuse device close");
 	KASSERT(data->dataflags | FSESS_OPENED,
 	        ("fuse device is already closed upon close"));
-	fdata_kick_set(data);
+	fdata_set_dead(data);
         data->dataflags &= ~FSESS_OPENED;
 	mtx_lock(&data->aw_mtx);
 
@@ -213,11 +213,11 @@ fuse_device_poll(struct cdev *dev, int events, struct thread *td)
 	struct fuse_data *data;
 	int revents = 0;
 
-	data = fusedev_get_data(dev);
+	data = fuse_get_devdata(dev);
 
 	if (events & (POLLIN | POLLRDNORM)) {
 		mtx_lock(&data->ms_mtx);
-		if (fdata_kick_get(data) || STAILQ_FIRST(&data->ms_head))
+		if (fdata_get_dead(data) || STAILQ_FIRST(&data->ms_head))
 			revents |= events & (POLLIN | POLLRDNORM);
 		else
 			selrecord(td, &data->ks_rsel);
@@ -246,13 +246,13 @@ fuse_device_read(struct cdev *dev, struct uio *uio, int ioflag)
 	int buflen[3];
 	int i;
 
-	data = fusedev_get_data(dev);
+	data = fuse_get_devdata(dev);
 
 	DEBUG("fuse device being read on thread %d\n", uio->uio_td->td_tid);
 
 	mtx_lock(&data->ms_mtx);
 again:
-	if (fdata_kick_get(data)) {
+	if (fdata_get_dead(data)) {
 		DEBUG2G("we know early on that reader should be kicked so we don't wait for news\n");
 		mtx_unlock(&data->ms_mtx);
 		return (ENODEV);
@@ -269,7 +269,7 @@ again:
 			err = msleep(data, &data->ms_mtx, PCATCH, "fu_msg", 0);
 			if (err != 0) {
 				mtx_unlock(&data->ms_mtx);
-				return (fdata_kick_get(data) ? ENODEV : err);
+				return (fdata_get_dead(data) ? ENODEV : err);
 			}
 			tick = fuse_ms_pop(data);
 		}
@@ -286,7 +286,7 @@ again:
 	}
 	mtx_unlock(&data->ms_mtx);
 
-	if (fdata_kick_get(data)) {
+	if (fdata_get_dead(data)) {
 		/*
 		 * somebody somewhere -- eg., umount routine --
 		 * wants this liaison finished off
@@ -331,7 +331,7 @@ again:
 		 * fallacy as loud as possible...
 		 */
 		if (uio->uio_resid < buflen[i]) {
-			fdata_kick_set(data);
+			fdata_set_dead(data);
 			DEBUG2G("daemon is stupid, kick it off...\n");
 			err = ENODEV;
 			break;
@@ -392,11 +392,11 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 	DEBUG("Fuse write -- resid: %zd, iovcnt: %d, thread: %d\n",
 		uio->uio_resid, uio->uio_iovcnt, uio->uio_td->td_tid);
 
-	data = fusedev_get_data(dev);
+	data = fuse_get_devdata(dev);
 
 	if (uio->uio_resid < sizeof(struct fuse_out_header)) {
 		DEBUG("got less than a header!\n");
-		fdata_kick_set(data);
+		fdata_set_dead(data);
 		return (EINVAL);
 	}
 
@@ -411,7 +411,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 	 * header.
 	 */
 	if ((err = fuse_ohead_audit(&ohead, uio))) {
-		fdata_kick_set(data);
+		fdata_set_dead(data);
 		return (err);
 	}
 	
@@ -473,7 +473,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 		 */
 		DEBUG("erhm, no handler for this response\n");
 
-		fdata_kick_set(data);
+		fdata_set_dead(data);
 		return (EINVAL);
 	}
 

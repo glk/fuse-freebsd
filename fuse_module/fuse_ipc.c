@@ -203,7 +203,7 @@ fticket_wait_answer(struct fuse_ticket *ftick)
         goto out;
     }
 
-    if (fdata_kick_get(ftick->tk_data)) {
+    if (fdata_get_dead(ftick->tk_data)) {
         err = ENOTCONN;
         fticket_set_answered(ftick);
         goto out;
@@ -334,25 +334,25 @@ fdata_destroy(struct fuse_data *data)
 }
 
 int
-fdata_kick_get(struct fuse_data *data)
+fdata_get_dead(struct fuse_data *data)
 {
     debug_printf("data=%p\n", data);
 
-    return (data->dataflags & FSESS_KICK);
+    return (data->dataflags & FSESS_DEAD);
 }
 
 void
-fdata_kick_set(struct fuse_data *data)
+fdata_set_dead(struct fuse_data *data)
 {
     debug_printf("data=%p\n", data);
 
     mtx_lock(&data->ms_mtx);
-    if (fdata_kick_get(data)) { 
+    if (fdata_get_dead(data)) {
         mtx_unlock(&data->ms_mtx);
         return;
     }
 
-    data->dataflags |= FSESS_KICK;
+    data->dataflags |= FSESS_DEAD;
     wakeup_one(data);
     selwakeuppri(&data->ks_rsel, PZERO + 1);
     mtx_unlock(&data->ms_mtx);
@@ -461,7 +461,7 @@ fuse_ticket_fetch(struct fuse_data *data)
     }
 
     if (err) {
-        fdata_kick_set(data);
+        fdata_set_dead(data);
     }
 
     return ftick;
@@ -512,7 +512,7 @@ fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t *handler)
 {
     debug_printf("ftick=%p, handler=%p\n", ftick, handler);
 
-    if (fdata_kick_get(ftick->tk_data)) {
+    if (fdata_get_dead(ftick->tk_data)) {
         return;
     }
 
@@ -534,7 +534,7 @@ fuse_insert_message(struct fuse_ticket *ftick)
 
     ftick->tk_flag |= FT_DIRTY;
 
-    if (fdata_kick_get(ftick->tk_data)) {
+    if (fdata_get_dead(ftick->tk_data)) {
         return;
     }
 
@@ -783,7 +783,7 @@ fdisp_make_pid(struct fuse_dispatcher *fdip,
                pid_t pid,
                struct ucred *cred)
 {
-    struct fuse_data *data = fusefs_get_data(mp);
+    struct fuse_data *data = fuse_get_mpdata(mp);
 
     debug_printf("fdip=%p, op=%d, mp=%p, nid=%ju\n",
                  fdip, op, mp, (uintmax_t)nid);

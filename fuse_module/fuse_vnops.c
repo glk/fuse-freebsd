@@ -255,14 +255,14 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     // XXX: Will we ever want devices?
     if ((vap->va_type != VREG) ||
-        fusefs_get_data(mp)->dataflags & FSESS_NOCREATE) {
+        fuse_get_mpdata(mp)->dataflags & FSESS_NOCREATE) {
         goto good_old;
     }
 
     debug_printf("parent nid = %ju, mode = %x\n", (uintmax_t)parentnid, mode);
 
     fdisp_init(fdip, sizeof(*foi) + cnp->cn_namelen + 1);
-    if (fusefs_get_data(vnode_mount(dvp))->dataflags & FSESS_NOCREATE) {
+    if (fuse_get_mpdata(vnode_mount(dvp))->dataflags & FSESS_NOCREATE) {
         debug_printf("eh, daemon doesn't implement create?\n");
         goto good_old;
     }
@@ -281,7 +281,7 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     if (err == ENOSYS) {
         debug_printf("create: got ENOSYS from daemon\n");
-        fusefs_get_data(vnode_mount(dvp))->dataflags |= FSESS_NOCREATE;
+        fuse_get_mpdata(vnode_mount(dvp))->dataflags |= FSESS_NOCREATE;
         fdip->tick = NULL;
         goto good_old;
     } else if (err) {
@@ -407,7 +407,7 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
     if ((err = vop_stdfsync(ap)))
         return err;
 
-    if (!(fusefs_get_data(vnode_mount(vp))->dataflags &
+    if (!(fuse_get_mpdata(vnode_mount(vp))->dataflags &
         (vnode_vtype(vp) == VDIR ? FSESS_NOFSYNCDIR : FSESS_NOFSYNC))) {
         goto out;
     }
@@ -447,7 +447,7 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
 
     fuse_trace_printf_vnop();
 
-    dataflags = fusefs_get_data(vnode_mount(vp))->dataflags;
+    dataflags = fuse_get_mpdata(vnode_mount(vp))->dataflags;
 
     /* Note that we are not bailing out on a dead file system just yet. */
 
@@ -463,7 +463,7 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
 
     if (!(dataflags & FSESS_INITED)) {
         if (!vnode_isvroot(vp)) {
-            fdata_kick_set(fusefs_get_data(vnode_mount(vp)));
+            fdata_set_dead(fuse_get_mpdata(vnode_mount(vp)));
             err = ENOTCONN;
             debug_printf("fuse_getattr b: returning ENOTCONN\n");
             return err;
@@ -1231,7 +1231,7 @@ ok:
 
     {
 #ifdef XXXIP
-        int dataflags = fusefs_get_data(vnode_mount(vp))->dataflags;
+        int dataflags = fuse_get_mpdata(vnode_mount(vp))->dataflags;
         if (dataflags & FSESS_NO_READAHEAD) {
             vnode_setnoreadahead(vp);
         }
@@ -1364,7 +1364,7 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
     }
 
     if (((char *)fdi.answ)[0] == '/' &&
-        fusefs_get_data(vnode_mount(vp))->dataflags & FSESS_PUSH_SYMLINKS_IN) {
+        fuse_get_mpdata(vnode_mount(vp))->dataflags & FSESS_PUSH_SYMLINKS_IN) {
             char *mpth = vnode_mount(vp)->mnt_stat.f_mntonname;
             err = uiomove(mpth, strlen(mpth), uio);
     }

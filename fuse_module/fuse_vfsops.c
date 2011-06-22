@@ -180,7 +180,7 @@ fuse_vfsop_mount(struct mount *mp)
         return ENXIO;
     }
 
-    data = fusedev_get_data(fdev);
+    data = fuse_get_devdata(fdev);
     if (data && data->dataflags & FSESS_OPENED) {
         data->mntco++;
         debug_printf("a.inc:mntco = %d\n", data->mntco);
@@ -211,7 +211,7 @@ fuse_vfsop_mount(struct mount *mp)
     subtype = vfs_getopts(opts, "subtype=", &err);
     err = 0;
 
-    if (fdata_kick_get(data))
+    if (fdata_get_dead(data))
         err = ENOTCONN;
     if (mntopts & FSESS_DAEMON_CAN_SPY)
         err = priv_check(td, PRIV_VFS_FUSE_ALLOWOTHER);
@@ -295,7 +295,7 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
         flags |= FORCECLOSE;
     }
 
-    data = fusefs_get_data(mp);
+    data = fuse_get_mpdata(mp);
     if (!data) {
         panic("no private data for mount point?");
     }
@@ -307,7 +307,7 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
         return err;
     }
 
-    if (fdata_kick_get(data)) {
+    if (fdata_get_dead(data)) {
         goto alreadydead;
     }
 
@@ -319,7 +319,7 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
         fuse_ticket_drop(fdi.tick);
     }
 
-    fdata_kick_set(data);
+    fdata_set_dead(data);
 
 alreadydead:
     data->mpri = FM_NOMOUNTED;
@@ -362,7 +362,7 @@ fuse_vfsop_statfs(struct mount *mp, struct statfs *sbp)
     struct fuse_data       *data;
 
     DEBUG2G("mp %p: %s\n", mp, mp->mnt_stat.f_mntfromname);
-    data = fusefs_get_data(mp);
+    data = fuse_get_mpdata(mp);
 
     if (!(data->dataflags & FSESS_INITED))
         goto fake;

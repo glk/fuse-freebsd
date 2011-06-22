@@ -112,18 +112,18 @@ int
 fuse_isdeadfs(struct vnode *vp)
 {
     struct mount *mp = vnode_mount(vp);
-    struct fuse_data *data = fusefs_get_data(mp);
+    struct fuse_data *data = fuse_get_mpdata(mp);
 
-    return (data->dataflags & FSESS_KICK);
+    return (data->dataflags & FSESS_DEAD);
 }
 
 static __inline__
 int
 fuse_isdeadfs_mp(struct mount *mp)
 {
-    struct fuse_data *data = fusefs_get_data(mp);
+    struct fuse_data *data = fuse_get_mpdata(mp);
 
-    return (data->dataflags & FSESS_KICK);
+    return (data->dataflags & FSESS_DEAD);
 }
 
 /* access */

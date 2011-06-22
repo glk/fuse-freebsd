@@ -75,7 +75,7 @@ fuse_internal_access(struct vnode *vp,
     mp = vnode_mount(vp);
     vtype = vnode_vtype(vp);
 
-    data = fusefs_get_data(mp);
+    data = fuse_get_mpdata(mp);
     dataflags = data->dataflags;
 
     if ((mode & VWRITE) && vfs_isrdonly(mp)) {
@@ -108,7 +108,7 @@ fuse_internal_access(struct vnode *vp,
 #endif
     }
 
-    if (fusefs_get_data(mp)->dataflags & FSESS_NOACCESS) {
+    if (fuse_get_mpdata(mp)->dataflags & FSESS_NOACCESS) {
         // Let the kernel handle this.
         return 0;
     }
@@ -149,7 +149,7 @@ fuse_internal_access(struct vnode *vp,
     }
 
     if (err == ENOSYS) {
-        fusefs_get_data(mp)->dataflags |= FSESS_NOACCESS;
+        fuse_get_mpdata(mp)->dataflags |= FSESS_NOACCESS;
         err = 0; // ENOTSUP;
     }
 
@@ -618,7 +618,7 @@ out:
     fuse_ticket_drop(tick);
 
     if (err) {
-        fdata_kick_set(data);
+        fdata_set_dead(data);
     }
 
     mtx_lock(&data->ticket_mtx);
