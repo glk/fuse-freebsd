@@ -56,6 +56,12 @@ vnode_isdir(struct vnode *vp)
     return (vp->v_type == VDIR ? 1 : 0);
 }
 
+static __inline int
+vnode_islnk(struct vnode *vp)
+{
+    return (vp->v_type == VLNK ? 1 : 0);
+}
+
 static __inline ssize_t
 uio_resid(struct uio *uio)
 {
