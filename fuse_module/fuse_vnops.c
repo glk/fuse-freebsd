@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
+ * Amit Singh <singh@>
+ */
+
 #include "config.h"
 
 #include <sys/types.h>
@@ -133,7 +138,9 @@ int fuse_pbuf_freecnt = -1;
 static int
 fuse_vnop_access(struct vop_access_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
+    struct vnode *vp      = ap->a_vp;
+    int           accmode = ap->a_accmode;
+
     struct fuse_access_param facp;
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
 
@@ -158,7 +165,7 @@ fuse_vnop_access(struct vop_access_args *ap)
         facp.facc_flags |= FACCESS_DO_ACCESS;
     }   
 
-    return fuse_internal_access(vp, ap->a_accmode, &facp, ap->a_td, ap->a_cred);
+    return fuse_internal_access(vp, accmode, &facp, ap->a_td, ap->a_cred);
 }
 
 /*
@@ -172,8 +179,11 @@ fuse_vnop_access(struct vop_access_args *ap)
 static int
 fuse_vnop_close(struct vop_close_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    fufh_type_t             fufh_type;
+    struct vnode *vp      = ap->a_vp;
+    int           fflag   = ap->a_fflag;
+    int isdir = (vnode_isdir(vp)) ? 1 : 0;
+    fufh_type_t fufh_type;
+
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_filehandle *fufh = NULL;
 
@@ -183,10 +193,10 @@ fuse_vnop_close(struct vop_close_args *ap)
         return 0;
     }
 
-    if (vnode_vtype(vp) == VDIR) {
+    if (isdir) {
         fufh_type = FUFH_RDONLY;
     } else {
-        fufh_type = fuse_filehandle_xlate_from_fflags(ap->a_fflag);
+        fufh_type = fuse_filehandle_xlate_from_fflags(fflag);
     }
 
     fufh = &(fvdat->fufh[fufh_type]);
@@ -215,18 +225,18 @@ fuse_vnop_close(struct vop_close_args *ap)
 static int
 fuse_vnop_create(struct vop_create_args *ap)
 {
-    struct vnode *dvp = ap->a_dvp;
-    struct vnode **vpp = ap->a_vpp;
-    struct componentname *cnp = ap->a_cnp;
-    struct vattr *vap = ap->a_vap;
-    struct thread *td = cnp->cn_thread;
-    struct ucred *cred = cnp->cn_cred;
+    struct vnode         *dvp     = ap->a_dvp;
+    struct vnode        **vpp     = ap->a_vpp;
+    struct componentname *cnp     = ap->a_cnp;
+    struct vattr         *vap     = ap->a_vap;
+    struct thread        *td      = cnp->cn_thread;
+    struct ucred         *cred    = cnp->cn_cred;
 
+    struct fuse_open_in    *foi;
+    struct fuse_mknod_in    fmni;
+    struct fuse_entry_out  *feo;
     struct fuse_dispatcher  fdi;
     struct fuse_dispatcher *fdip = &fdi;
-    struct fuse_entry_out  *feo;
-    struct fuse_mknod_in    fmni;
-    struct fuse_open_in    *foi;
 
     int err;
     int gone_good_old = 0;
@@ -238,21 +248,21 @@ fuse_vnop_create(struct vop_create_args *ap)
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs_nop(dvp)) {
-        panic("fuse_vnop_create(): called on a dead file system");
+        panic("FUSE: fuse_vnop_create(): called on a dead file system");
     }
 
     bzero(&fdi, sizeof(fdi));
 
     // XXX: Will we ever want devices?
     if ((vap->va_type != VREG) ||
-        fusefs_get_data(mp)->dataflag & FSESS_NOCREATE) {
+        fusefs_get_data(mp)->dataflags & FSESS_NOCREATE) {
         goto good_old;
     }
 
     debug_printf("parent nid = %ju, mode = %x\n", (uintmax_t)parentnid, mode);
 
     fdisp_init(fdip, sizeof(*foi) + cnp->cn_namelen + 1);
-    if (fusefs_get_data(vnode_mount(dvp))->dataflag & FSESS_NOCREATE) {
+    if (fusefs_get_data(vnode_mount(dvp))->dataflags & FSESS_NOCREATE) {
         debug_printf("eh, daemon doesn't implement create?\n");
         goto good_old;
     }
@@ -271,7 +281,7 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     if (err == ENOSYS) {
         debug_printf("create: got ENOSYS from daemon\n");
-        fusefs_get_data(vnode_mount(dvp))->dataflag |= FSESS_NOCREATE;
+        fusefs_get_data(vnode_mount(dvp))->dataflags |= FSESS_NOCREATE;
         fdip->tick = NULL;
         goto good_old;
     } else if (err) {
@@ -301,10 +311,9 @@ bringup:
         goto undo;
     }
 
-    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, VREG,
-	/*size*/0);
+    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, VREG, /*size*/0);
     if (!err && !gone_good_old) {
-	    VTOFUD(*vpp)->flag |= FN_CREATING;
+        VTOFUD(*vpp)->flag |= FN_CREATING;
     }
     if (err) {
        if (gone_good_old) {
@@ -328,6 +337,7 @@ bringup:
     fdip->answ = gone_good_old ? NULL : feo + 1;
 
     if (!gone_good_old) {
+
         uint64_t x_fh_id = ((struct fuse_open_out *)(feo + 1))->fh;
         uint32_t x_open_flags = ((struct fuse_open_out *)(feo + 1))->open_flags;
         struct fuse_vnode_data *fvdat = VTOFUD(*vpp);
@@ -349,10 +359,10 @@ bringup:
 #endif
     }
 
-    return (0);
+    return 0;
 
 undo:
-    return (err);
+    return err;
 }
 
 /*
@@ -379,12 +389,14 @@ undo:
 static int
 fuse_vnop_fsync(struct vop_fsync_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    struct thread *td = ap->a_td;
+    struct vnode *vp      = ap->a_vp;
+    struct thread *td     = ap->a_td;
+
     struct fuse_dispatcher fdi;
     struct fuse_filehandle *fufh;
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
-    int err, type;
+
+    int type, err = 0;
 
     fuse_trace_printf_vnop();
 
@@ -393,9 +405,9 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
     }
 
     if ((err = vop_stdfsync(ap)))
-        return (err); 
+        return err;
 
-    if (!(fusefs_get_data(vnode_mount(vp))->dataflag &
+    if (!(fusefs_get_data(vnode_mount(vp))->dataflags &
         (vnode_vtype(vp) == VDIR ? FSESS_NOFSYNCDIR : FSESS_NOFSYNC))) {
         goto out;
     }
@@ -412,11 +424,6 @@ out:
     return 0;
 }
 
-#define fusetimespeccmp(tvp, uvp, cmp)           \
-        (((tvp)->tv_sec == (uvp)->tv_sec) ?     \
-         ((tvp)->tv_nsec cmp (uvp)->tv_nsec) :  \
-         ((tvp)->tv_sec cmp (uvp)->tv_sec))
-
 /*
     struct vnop_getattr_args {
 	struct vnode *a_vp;
@@ -428,49 +435,50 @@ out:
 static int
 fuse_vnop_getattr(struct vop_getattr_args *ap)
 {
+    struct vnode      *vp      = ap->a_vp;
+    struct vattr      *vap     = ap->a_vap;
+    struct ucred      *cred    = ap->a_cred;
+    struct thread     *td      = curthread;
+
     int err = 0;
-    int dataflag;
-    struct vnode *vp = ap->a_vp;
-    struct vattr *vap = ap->a_vap;
-    struct ucred *cred = ap->a_cred;
-    struct thread *td = curthread;
-    struct fuse_dispatcher fdi;
+    int dataflags;
     struct timespec uptsp;
+    struct fuse_dispatcher fdi;
 
     fuse_trace_printf_vnop();
 
-    dataflag = fusefs_get_data(vnode_mount(vp))->dataflag;
+    dataflags = fusefs_get_data(vnode_mount(vp))->dataflags;
 
     /* Note that we are not bailing out on a dead file system just yet. */
 
     /* look for cached attributes */
     nanouptime(&uptsp);
-    if (fusetimespeccmp(&uptsp, &VTOFUD(vp)->cached_attrs_valid, <=)) {
+    if (fuse_timespec_cmp(&uptsp, &VTOFUD(vp)->cached_attrs_valid, <=)) {
         if (vap != VTOVA(vp)) {
             memcpy(vap, VTOVA(vp), sizeof(*vap));
         }
         debug_printf("fuse_getattr a: returning 0\n");
-        return (0);
+        return 0;
     }
 
-    if (!(dataflag & FSESS_INITED)) {
+    if (!(dataflags & FSESS_INITED)) {
         if (!vnode_isvroot(vp)) {
             fdata_kick_set(fusefs_get_data(vnode_mount(vp)));
             err = ENOTCONN;
             debug_printf("fuse_getattr b: returning ENOTCONN\n");
-            return (err);
+            return err;
         } else {
             goto fake;
         }
     }
 
     if ((err = fdisp_simple_putget_vp(&fdi, FUSE_GETATTR, vp, td, cred))) {
-        if (err == ENOTCONN && vnode_isvroot(vp)) {
+        if ((err == ENOTCONN) && vnode_isvroot(vp)) {
             /* see comment at similar place in fuse_statfs() */
             goto fake;
         }
         debug_printf("fuse_getattr c: returning ENOTCONN\n");
-        return (err);
+        return err;
     }
 
     cache_attrs(vp, (struct fuse_attr_out *)fdi.answ);
@@ -495,25 +503,29 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
     fuse_ticket_drop(fdi.tick);
 
     if (vnode_vtype(vp) != vap->va_type) {
-        if (vnode_vtype(vp) == VNON && vap->va_type != VNON) {
-            // vp->v_type = vap->va_type;
+        if ((vnode_vtype(vp) == VNON) && (vap->va_type != VNON)) {
+            /*
+             * We should be doing the following:
+             *
+             * vp->vtype = vap->v_type
+             */
         } else {
             /* stale vnode */
             // XXX: vnode should be ditched.
             debug_printf("fuse_getattr d: returning ENOTCONN\n");
-            return (ENOTCONN);
+            return ENOTCONN;
         }
     }
 
     debug_printf("fuse_getattr e: returning 0\n");
 
-    return (0);
+    return 0;
 
 fake:
     bzero(vap, sizeof(*vap));
     vap->va_type = vnode_vtype(vp);
 
-    return (0);
+    return 0;
 }
 
 /*
@@ -525,10 +537,12 @@ fake:
 static int
 fuse_vnop_inactive(struct vop_inactive_args *ap)
 {
-    struct vnode *vp = ap->a_vp;	
-    struct thread *td = ap->a_td;
+    struct vnode *vp      = ap->a_vp;
+    struct thread *td     = ap->a_td;
+
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_filehandle *fufh = NULL;
+
     int type;
 
     fuse_trace_printf_vnop();
@@ -555,14 +569,15 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
 static int
 fuse_vnop_link(struct vop_link_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    struct vnode *tdvp = ap->a_tdvp;
-    struct componentname *cnp = ap->a_cnp;
+    struct vnode         *vp      = ap->a_vp;
+    struct vnode         *tdvp    = ap->a_tdvp;
+    struct componentname *cnp     = ap->a_cnp;
 
-    int err = 0;
     struct fuse_dispatcher fdi;
     struct fuse_entry_out *feo;
     struct fuse_link_in    fli;
+
+    int err;
 
     fuse_trace_printf_vnop();
 
@@ -571,7 +586,7 @@ fuse_vnop_link(struct vop_link_args *ap)
     }
 
     if (vnode_mount(tdvp) != vnode_mount(vp)) {
-        return (EXDEV);
+        return EXDEV;
     }
 
     fli.oldnodeid = VTOI(vp);
@@ -580,7 +595,7 @@ fuse_vnop_link(struct vop_link_args *ap)
     fuse_internal_newentry_makerequest(vnode_mount(tdvp), VTOI(tdvp), cnp,
                                        FUSE_LINK, &fli, sizeof(fli), &fdi);
     if ((err = fdisp_wait_answ(&fdi))) {
-        return (err);
+        return err;
     }
 
     feo = fdi.answ;
@@ -590,7 +605,11 @@ fuse_vnop_link(struct vop_link_args *ap)
     fuse_invalidate_attr(tdvp);
     fuse_invalidate_attr(vp);
 
-    return (err);
+    if (err == 0) {
+        VTOFUD(vp)->nlookup++;
+    }
+
+    return err;
 }
 
 /*
@@ -604,41 +623,42 @@ fuse_vnop_link(struct vop_link_args *ap)
 int
 fuse_vnop_lookup(struct vop_lookup_args *ap)
 {
+    struct vnode *dvp         = ap->a_dvp;
+    struct vnode **vpp        = ap->a_vpp;
     struct componentname *cnp = ap->a_cnp;
+    struct thread *td         = cnp->cn_thread;
+    struct ucred *cred        = cnp->cn_cred;
+
     int nameiop               = cnp->cn_nameiop;
     int flags                 = cnp->cn_flags;
     int wantparent            = flags & (LOCKPARENT|WANTPARENT);
     int islastcn              = flags & ISLASTCN;
-    struct vnode *dvp         = ap->a_dvp;
-    struct vnode **vpp        = ap->a_vpp;
-    struct thread *td         = cnp->cn_thread;
-    struct ucred *cred        = cnp->cn_cred;
     struct mount *mp          = vnode_mount(dvp);
-
-    fuse_trace_printf_vnop();
 
     int err                   = 0;
     int lookup_err            = 0;
     struct vnode *vp          = NULL;
-    struct fuse_attr *fattr   = NULL;
+    uint64_t size             = 0;
+
     struct fuse_dispatcher fdi;
-    enum fuse_opcode op;
+    enum   fuse_opcode     op;
+
     uint64_t nid;
     struct fuse_access_param facp;
-    uint64_t size = 0;
+
+    fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs(dvp)) {
         *vpp = NULL;
         return ENXIO;
     }
 
-    if (vnode_vtype(dvp) != VDIR) {
+    if (!vnode_isdir(dvp)) {
         return ENOTDIR;
     }
 
-    if (islastcn && vfs_isrdonly(mp) &&
-        ((nameiop == DELETE) || (nameiop == RENAME) || (nameiop == CREATE))) {
-        return (EROFS);
+    if (islastcn && vfs_isrdonly(mp) && (nameiop != LOOKUP)) {
+        return EROFS;
     }
 
     /*
@@ -692,7 +712,7 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
     op = FUSE_LOOKUP;
 
 calldaemon:
-    fdisp_make(&fdi, op, vnode_mount(dvp), nid, td, cred);
+    fdisp_make(&fdi, op, mp, nid, td, cred);
 
     if (op == FUSE_LOOKUP) {
         memcpy(fdi.indata, cnp->cn_nameptr, cnp->cn_namelen);
@@ -701,7 +721,7 @@ calldaemon:
 
     lookup_err = fdisp_wait_answ(&fdi);
 
-    if (op == FUSE_LOOKUP && !lookup_err) {
+    if ((op == FUSE_LOOKUP) && !lookup_err) { /* lookup call succeeded */
         nid = ((struct fuse_entry_out *)fdi.answ)->nodeid;
         size = ((struct fuse_entry_out *)fdi.answ)->attr.size;
         if (!nid) {
@@ -717,22 +737,16 @@ calldaemon:
     }
 
     if (lookup_err &&
-        ((!fdi.answ_stat) || lookup_err != ENOENT || op != FUSE_LOOKUP)) {
-        /*
-         * There is error but not lookup related actually
-         * (messaging error)
-         */
-        return (lookup_err);
+        (!fdi.answ_stat || lookup_err != ENOENT || op != FUSE_LOOKUP)) {
+        return lookup_err;
     }
 
-    /*
-     * Now we got the answer and filtered out the crap, too, so we know that
-     * "found" iff lookup_err == 0
-     */
+    /* lookup_err, if non-zero, must be ENOENT at this point */
 
     if (lookup_err) {
-        if ((nameiop == CREATE || nameiop == RENAME) &&
-            islastcn /* && directory dvp has not been removed */) {
+
+        if ((nameiop == CREATE || nameiop == RENAME) && islastcn
+            /* && directory dvp has not been removed */) {
 
             if (vfs_isrdonly(mp)) {
                 err = EROFS;
@@ -753,7 +767,7 @@ calldaemon:
              * pathname for use later in VOP_CREATE or VOP_RENAME.
              */
             cnp->cn_flags |= SAVENAME;
-            
+
             err = EJUSTRETURN;
             goto out;
         }
@@ -780,10 +794,16 @@ calldaemon:
 
     } else {
 
+        /* !lookup_err */
+
+        struct fuse_entry_out *feo   = NULL;
+        struct fuse_attr      *fattr = NULL;
+
         if (op == FUSE_GETATTR) {
             fattr = &((struct fuse_attr_out *)fdi.answ)->attr;
         } else {
-            fattr = &((struct fuse_entry_out *)fdi.answ)->attr;
+            feo = (struct fuse_entry_out *)fdi.answ;
+            fattr = &(feo->attr);
         }
 
         /*
@@ -811,20 +831,6 @@ calldaemon:
                 goto out;
             }
 
-            /*
-             * XXX We discard generation, also brought to us by
-             * LOOKUP. It's purpose is unclear... it seems to be
-             * simply just yet another 32/64 bit extension for the
-             * inode number, but I'm not sure (hmm, it seems to
-             * have something to do with NFS exportability, too).
-             *
-             * (Linux has such a 32 bit value in its inode struct,
-             * and it really might just be a backward compatible
-             * extension for the inode space [but might as well
-             * be more into it, dunno]. The FUSE protocol uses
-             * a 64 bit generation value; FUSE/Linux uses it for
-             * filling the inode's i_generation field.)
-             */   
             err = fuse_vnode_get(dvp->v_mount,
                                  nid,
                                  dvp,
@@ -839,6 +845,7 @@ calldaemon:
             *vpp = vp;
         
             goto out;
+
         }
 
         /*
@@ -919,10 +926,11 @@ calldaemon:
             *vpp = vp;
         }
 
-        if (op == FUSE_GETATTR)
+        if (op == FUSE_GETATTR) {
             cache_attrs(*vpp, (struct fuse_attr_out *)fdi.answ);
-        else
+        } else {
             cache_attrs(*vpp, (struct fuse_entry_out *)fdi.answ);
+        }
 
         /* Insert name into cache if appropriate. */
 
@@ -955,12 +963,15 @@ calldaemon:
     }
 out:
     if (!lookup_err) {
-        // as the looked up thing was simply found, the cleanup is left for us
-        if (err) {
-            // though inode found, err exit with no vnode
-            if (op == FUSE_LOOKUP)
-                fuse_internal_forget_send(vnode_mount(dvp), td, cred, nid, 1, &fdi);
-            return (err);
+
+        /* No lookup error; need to clean up. */
+
+        if (err) { /* Found inode; exit with no vnode. */
+            if (op == FUSE_LOOKUP) {
+                fuse_internal_forget_send(vnode_mount(dvp), td, cred,
+                                          nid, 1, &fdi);
+            }
+            return err;
         } else {
 #ifndef NO_EARLY_PERM_CHECK_HACK
             if (!islastcn) {
@@ -998,8 +1009,9 @@ out:
                 // the early perm check hack
                 facp.facc_flags |= FACCESS_VA_VALID;
 
-                if (tmpvtype != VDIR && tmpvtype != VLNK)
+                if ((tmpvtype != VDIR) && (tmpvtype != VLNK)) {
                     err = ENOTDIR;
+                }
 
                 if (!err && !vnode_mountedhere(*vpp)) {
                     err = fuse_internal_access(*vpp, VEXEC, &facp, td, cred);
@@ -1018,7 +1030,7 @@ out:
         fuse_ticket_drop(fdi.tick);
     }
 
-    return (err);
+    return err;
 }
 
 /*
@@ -1032,23 +1044,27 @@ out:
 static int
 fuse_vnop_mkdir(struct vop_mkdir_args *ap)
 {
-    struct vnode *dvp = ap->a_dvp;
-    struct vnode **vpp = ap->a_vpp;
-    struct componentname *cnp = ap->a_cnp;
-    struct vattr *vap = ap->a_vap;
+    struct vnode         *dvp     = ap->a_dvp;
+    struct vnode        **vpp     = ap->a_vpp;
+    struct componentname *cnp     = ap->a_cnp;
+    struct vattr         *vap     = ap->a_vap;
 
-    struct fuse_mkdir_in fmdi; 
+    int err = 0;
+
+    struct fuse_mkdir_in fmdi;
 
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs_nop(dvp)) {
-        panic("fuse_vnop_mkdir(): called on a dead file system");
+        panic("FUSE: fuse_vnop_mkdir(): called on a dead file system");
     }
 
     fmdi.mode = MAKEIMODE(vap->va_type, vap->va_mode);
 
-    return fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKDIR, &fmdi,
+    err = fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKDIR, &fmdi,
                                  sizeof(fmdi), VDIR);
+
+    return err;
 }
 
 /*
@@ -1062,12 +1078,14 @@ fuse_vnop_mkdir(struct vop_mkdir_args *ap)
 static int
 fuse_vnop_mknod(struct vop_mknod_args *ap)
 {
-    struct vnode *dvp = ap->a_dvp;
-    struct vnode **vpp = ap->a_vpp;
-    struct componentname *cnp = ap->a_cnp;
-    struct vattr *vap = ap->a_vap;
+    struct vnode         *dvp     = ap->a_dvp;
+    struct vnode        **vpp     = ap->a_vpp;
+    struct componentname *cnp     = ap->a_cnp;
+    struct vattr         *vap     = ap->a_vap;
 
-    struct fuse_mknod_in fmni; 
+    struct fuse_mknod_in fmni;
+
+    int err;
 
     fuse_trace_printf_vnop();
 
@@ -1078,8 +1096,10 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
     fmni.mode = MAKEIMODE(vap->va_type, vap->va_mode);
     fmni.rdev = vap->va_rdev;
 
-    return fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKNOD, &fmni,
+    err = fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKNOD, &fmni,
                                  sizeof(fmni), vap->va_type);
+
+    return err;
 }
 
 
@@ -1095,15 +1115,17 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
 static int
 fuse_vnop_open(struct vop_open_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    struct thread *td = ap->a_td;
-    struct ucred *cred = ap->a_cred;
+    struct vnode *vp      = ap->a_vp;
+    int           mode    = ap->a_mode;
+    struct thread *td     = ap->a_td;
+    struct ucred *cred    = ap->a_cred;
+
     fufh_type_t             fufh_type;
     struct fuse_vnode_data *fvdat;
     struct fuse_filehandle *fufh = NULL;
     struct fuse_filehandle *fufh_rw = NULL;
 
-    int error, isdir = 0, mode, oflags;
+    int error, isdir = 0, oflags;
 
     fuse_trace_printf_vnop();
 
@@ -1111,16 +1133,15 @@ fuse_vnop_open(struct vop_open_args *ap)
         return ENXIO;
     }
 
-    mode    = ap->a_mode;
-    fvdat   = VTOFUD(vp);
-    if (vnode_vtype(vp) == VDIR) {
+    fvdat = VTOFUD(vp);
+
+    if (vnode_isdir(vp)) {
         isdir = 1;
     }
 
     if (isdir) {
         fufh_type = FUFH_RDONLY;
     } else {
-        debug_printf("fuse_open(VREG)\n");
         fufh_type = fuse_filehandle_xlate_from_fflags(mode);
     }
 
@@ -1163,7 +1184,7 @@ fuse_vnop_open(struct vop_open_args *ap)
                 wakeup((caddr_t)&fvdat->creator); // wake up all
                 goto ok; /* return 0 */
             } else {
-                printf("contender going to sleep\n");
+                debug_printf("contender going to sleep\n");
                 error = msleep(&fvdat->creator, &fvdat->createlock,
                                PDROP | PINOD | PCATCH, "fuse_open", 0);
                 /*
@@ -1203,17 +1224,18 @@ ok:
         vnode_create_vobject(vp, 0, td);
     }
 
+    /*
+     * Doing this here because when a vnode goes inactive, things like
+     * no-cache and no-readahead are cleared by the kernel.
+     */
+
     {
-        /*
-         * Doing this here because when a vnode goes inactive, no-cache and
-         * no-readahead are cleared by the kernel.
-         */
 #ifdef XXXIP
-        int dataflag = fusefs_get_data(vnode_mount(vp))->dataflag;
-        if (dataflag & FSESS_NO_READAHEAD) {
+        int dataflags = fusefs_get_data(vnode_mount(vp))->dataflags;
+        if (dataflags & FSESS_NO_READAHEAD) {
             vnode_setnoreadahead(vp);
         }
-        if (dataflag & FSESS_NO_UBC) {
+        if (dataflags & FSESS_NO_UBC) {
             vnode_setnocache(vp);
         }
 #endif
@@ -1233,10 +1255,10 @@ ok:
 static int
 fuse_vnop_read(struct vop_read_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    struct ucred *cred = ap->a_cred;
-    struct uio *uio = ap->a_uio;
-    int ioflag = ap->a_ioflag;
+    struct vnode *vp      = ap->a_vp;
+    struct uio   *uio     = ap->a_uio;
+    int           ioflag  = ap->a_ioflag;
+    struct ucred *cred    = ap->a_cred;
 
     fuse_trace_printf_vnop();
 
@@ -1260,14 +1282,16 @@ fuse_vnop_read(struct vop_read_args *ap)
 static int
 fuse_vnop_readdir(struct vop_readdir_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    struct ucred *cred = ap->a_cred;
-    struct uio *uio = ap->a_uio;
-    int freefufh = 0;
-    int err = 0;
-    struct fuse_iov cookediov;
-    struct fuse_filehandle *fufh;
+    struct vnode  *vp           = ap->a_vp;
+    struct uio   *uio           = ap->a_uio;
+    struct ucred *cred          = ap->a_cred;
+
+    struct fuse_filehandle *fufh = NULL;
     struct fuse_vnode_data *fvdat;
+    struct fuse_iov         cookediov;
+
+    int err = 0;
+    int freefufh = 0;
 
     fuse_trace_printf_vnop();
 
@@ -1275,16 +1299,15 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
         return EBADF;
     }
 
-
-    /* Sanity check the uio data. */
-    if ( /* XXXIP (uio_iovcnt(uio) > 1) || */
-        (uio_resid(uio) < (int)sizeof(struct dirent))) {
-        return (EINVAL);
+    if ( /* XXXIP ((uio_iovcnt(uio) > 1)) || */
+        (uio_resid(uio) < sizeof(struct dirent))) {
+        return EINVAL;
     }
 
     fvdat = VTOFUD(vp);
 
     fufh = &(fvdat->fufh[FUFH_RDONLY]);
+
     if (!(fufh->fufh_flags & FUFH_VALID)) {
         err = fuse_filehandle_get(vp, NULL, cred, FUFH_RDONLY);
         if (err) {
@@ -1303,6 +1326,7 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
         fufh->open_count--;
         (void)fuse_filehandle_put(vp, NULL, NULL, FUFH_RDONLY, 0);
     }
+
     fuse_invalidate_attr(vp);
 
     return err;
@@ -1318,11 +1342,12 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
 static int
 fuse_vnop_readlink(struct vop_readlink_args *ap)
 {
-    int err;
-    struct vnode *vp = ap->a_vp;
-    struct uio *uio = ap->a_uio;
-    struct ucred *cred = ap->a_cred;
+    struct vnode *vp      = ap->a_vp;
+    struct uio   *uio     = ap->a_uio;
+    struct ucred *cred    = ap->a_cred;
+
     struct fuse_dispatcher fdi;
+    int err;
 
     fuse_trace_printf_vnop();
 
@@ -1330,7 +1355,7 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
         return EBADF;
     }
 
-    if (vnode_vtype(vp) != VLNK) {
+    if (!vnode_islnk(vp)) {
         return EINVAL;
     }
 
@@ -1339,7 +1364,7 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
     }
 
     if (((char *)fdi.answ)[0] == '/' &&
-        fusefs_get_data(vnode_mount(vp))->dataflag & FSESS_PUSH_SYMLINKS_IN) {
+        fusefs_get_data(vnode_mount(vp))->dataflags & FSESS_PUSH_SYMLINKS_IN) {
             char *mpth = vnode_mount(vp)->mnt_stat.f_mntonname;
             err = uiomove(mpth, strlen(mpth), uio);
     }
@@ -1351,7 +1376,7 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
     fuse_ticket_drop(fdi.tick);
     fuse_invalidate_attr(vp);
 
-    return (err);
+    return err;
 }
 
 /*
@@ -1363,11 +1388,13 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
 static int
 fuse_vnop_reclaim(struct vop_reclaim_args *ap)
 {
-    int type;
-    struct vnode *vp = ap->a_vp;
-    struct thread *td = ap->a_td;
+    struct vnode *vp      = ap->a_vp;
+    struct thread *td     = ap->a_td;
+
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_filehandle *fufh = NULL;
+
+    int type;
 
     fuse_trace_printf_vnop();
 
@@ -1414,14 +1441,16 @@ fuse_vnop_reclaim(struct vop_reclaim_args *ap)
 static int
 fuse_vnop_remove(struct vop_remove_args *ap)
 {
-    struct vnode *dvp = ap->a_dvp;
-    struct vnode *vp = ap->a_vp;
-    struct componentname *cnp = ap->a_cnp;
+    struct vnode         *dvp     = ap->a_dvp;
+    struct vnode         *vp      = ap->a_vp;
+    struct componentname *cnp     = ap->a_cnp;
+
+    int err;
 
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs_nop(vp)) {
-        panic("fuse_vnop_remove(): called on a dead file system");
+        panic("FUSE: fuse_vnop_remove(): called on a dead file system");
     }
 
     if (vnode_isdir(vp)) {
@@ -1430,7 +1459,9 @@ fuse_vnop_remove(struct vop_remove_args *ap)
 
     cache_purge(vp);
 
-    return (fuse_internal_remove(dvp, vp, cnp, FUSE_UNLINK));
+    err = fuse_internal_remove(dvp, vp, cnp, FUSE_UNLINK);
+
+    return err;
 }
 
 /*
@@ -1446,13 +1477,14 @@ fuse_vnop_remove(struct vop_remove_args *ap)
 static int
 fuse_vnop_rename(struct vop_rename_args *ap)
 {
-    int err = 0;
-    struct vnode *fdvp = ap->a_fdvp;
-    struct vnode *fvp = ap->a_fvp;
-    struct componentname *tcnp = ap->a_tcnp;
-    struct vnode *tdvp = ap->a_tdvp;
-    struct vnode *tvp = ap->a_tvp;
+    struct vnode *fdvp         = ap->a_fdvp;
+    struct vnode *fvp          = ap->a_fvp;
     struct componentname *fcnp = ap->a_fcnp;
+    struct vnode *tdvp         = ap->a_tdvp;
+    struct vnode *tvp          = ap->a_tvp;
+    struct componentname *tcnp = ap->a_tcnp;
+
+    int err = 0;
 
     fuse_trace_printf_vnop();
 
@@ -1506,20 +1538,26 @@ out:
 static int
 fuse_vnop_rmdir(struct vop_rmdir_args *ap)
 {
+    struct vnode         *dvp     = ap->a_dvp;
+    struct vnode         *vp      = ap->a_vp;
+
+    int err;
+
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs_nop(ap->a_vp)) {
         panic("fuse_vnop_rmdir(): called on a dead file system");
     }
 
-    if (VTOFUD(ap->a_vp) == VTOFUD(ap->a_dvp)) {
+    if (VTOFUD(vp) == VTOFUD(dvp)) {
         return EINVAL;
     }
 
     cache_purge(ap->a_vp);
 
-    return (fuse_internal_remove(ap->a_dvp, ap->a_vp, ap->a_cnp,
-                                 FUSE_RMDIR));
+    err = fuse_internal_remove(ap->a_dvp, ap->a_vp, ap->a_cnp, FUSE_RMDIR);
+
+    return err;
 }
 
 /*
@@ -1533,20 +1571,22 @@ fuse_vnop_rmdir(struct vop_rmdir_args *ap)
 static int
 fuse_vnop_setattr(struct vop_setattr_args *ap)
 {
-    struct vattr *vap = ap->a_vap;
-    struct vnode *vp = ap->a_vp;
-    struct ucred *cred = ap->a_cred;
-    struct thread *td = curthread;
+    struct vnode      *vp      = ap->a_vp;
+    struct vattr      *vap     = ap->a_vap;
+    struct ucred      *cred    = ap->a_cred;
+    struct thread     *td      = curthread;
 
-    struct fuse_dispatcher   fdi;
-    struct fuse_setattr_in  *fsai;
+    struct fuse_dispatcher  fdi;
+    struct fuse_setattr_in *fsai;
     struct fuse_access_param facp;
 
     int err = 0;
     enum vtype vtyp;
     int sizechanged = 0;
-    off_t newsize = 0;
-    
+    uint64_t newsize = 0;
+
+    fuse_trace_printf_vnop();
+
     /*
      * XXX: Locking
      *
@@ -1554,32 +1594,20 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
      * is indeed altering the size, then:
      *
      * lock_exclusive(truncatelock)
-     * lock(nodelock)
-     * set the new size
-     * unlock(nodelock)
-     * adjust ubc
-     * lock(nodelock)
-     * do cleanup
-     * unlock(nodelock)
+     *   lock(nodelock)
+     *     set the new size
+     *   unlock(nodelock)
+     *   adjust ubc
+     *   lock(nodelock)
+     *     do cleanup
+     *   unlock(nodelock)
      * unlock(truncatelock)
      * ...
      */
 
-    fuse_trace_printf_vnop();
-
     if (fuse_isdeadfs_nop(vp)) {
         return EBADF;
     }
-
-#if 0
-    if ((vap->va_type != VNON) || (vap->va_nlink != VNOVAL) ||
-        (vap->va_fsid != VNOVAL) || (vap->va_fileid != VNOVAL) ||
-        (vap->va_blocksize != VNOVAL) || (vap->va_rdev != VNOVAL) ||
-        ((int)vap->va_bytes != VNOVAL) || (vap->va_gen != VNOVAL))
-        return (EINVAL);
-    if (vap->va_flags != VNOVAL)
-        return (EOPNOTSUPP);
-#endif
 
     fdisp_init(&fdi, sizeof(*fsai));
     fdisp_make_vp(&fdi, FUSE_SETATTR, vp, td, cred);
@@ -1651,18 +1679,18 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 
 #undef FUSEATTR
 
-    if (!fsai->valid)
+    if (!fsai->valid) {
         goto out;
+    }
 
     vtyp = vnode_vtype(vp);
 
-    if (fsai->valid & FATTR_SIZE && vp->v_type == VDIR) {
+    if (fsai->valid & FATTR_SIZE && vtyp == VDIR) {
         err = EISDIR;
         goto out;
     }
 
-    if (vfs_isrdonly(vnode_mount(vp)) &&
-        (fsai->valid & ~FATTR_SIZE || vtyp == VREG)) {
+    if (vfs_isrdonly(vnode_mount(vp)) && (fsai->valid & ~FATTR_SIZE || vtyp == VREG)) {
         err = EROFS;
         goto out;
     }
@@ -1686,7 +1714,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 
     if ((err = fdisp_wait_answ(&fdi))) {
         fuse_invalidate_attr(vp);
-        return (err);
+        return err;
     }
 
     vtyp = IFTOVT(((struct fuse_attr_out *)fdi.answ)->attr.mode);
@@ -1712,7 +1740,7 @@ out:
         vnode_pager_setsize(vp, newsize);
     }
 
-    return (err);
+    return err;
 }
 
 /*
@@ -1729,7 +1757,7 @@ fuse_vnop_strategy(struct vop_strategy_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if ((vp == NULL) || (fuse_isdeadfs(vp))) {
+    if (!vp || fuse_isdeadfs(vp)) {
         bp->b_ioflags |= BIO_ERROR;
         bp->b_error = EIO;
         bufdone(bp);
@@ -1762,34 +1790,36 @@ fuse_vnop_strategy(struct vop_strategy_args *ap)
 static int
 fuse_vnop_symlink(struct vop_symlink_args *ap)
 {
-	struct vnode *dvp = ap->a_dvp;
-	struct vnode **vpp = ap->a_vpp;
-	struct componentname *cnp = ap->a_cnp;
-	char *target = ap->a_target;
+    struct vnode         *dvp     = ap->a_dvp;
+    struct vnode        **vpp     = ap->a_vpp;
+    struct componentname *cnp     = ap->a_cnp;
+    char                 *target  = ap->a_target;
 
-	struct fuse_dispatcher fdi;
-	size_t len;
-	int err;
+    struct fuse_dispatcher fdi;
 
-	/*
-	 * Unlike the other creator type calls, here we have to create a message
-	 * where the name of the new entry comes first, and the data describing
-	 * the entry comes second.
-	 * Hence we can't rely on our handy fuse_internal_newentry() routine,
-	 * but put together the message manually and just call the core part.
-	 */
+    int err;
+    size_t len;
 
-	len = strlen(target) + 1;
-	fdisp_init(&fdi, len + cnp->cn_namelen + 1);
-	fdisp_make_vp(&fdi, FUSE_SYMLINK, dvp, curthread, NULL);
+    /*
+     * Unlike the other creator type calls, here we have to create a message
+     * where the name of the new entry comes first, and the data describing
+     * the entry comes second.
+     * Hence we can't rely on our handy fuse_internal_newentry() routine,
+     * but put together the message manually and just call the core part.
+     */
 
-	memcpy(fdi.indata, cnp->cn_nameptr, cnp->cn_namelen);
-	((char *)fdi.indata)[cnp->cn_namelen] = '\0';
-	memcpy((char *)fdi.indata + cnp->cn_namelen + 1, target, len);
+    len = strlen(target) + 1;
+    fdisp_init(&fdi, len + cnp->cn_namelen + 1);
+    fdisp_make_vp(&fdi, FUSE_SYMLINK, dvp, curthread, NULL);
 
-	err = fuse_internal_newentry_core(dvp, vpp, cnp, VLNK, &fdi);
-	fuse_invalidate_attr(dvp);
-	return (err);
+    memcpy(fdi.indata, cnp->cn_nameptr, cnp->cn_namelen);
+    ((char *)fdi.indata)[cnp->cn_namelen] = '\0';
+    memcpy((char *)fdi.indata + cnp->cn_namelen + 1, target, len);
+
+    err = fuse_internal_newentry_core(dvp, vpp, cnp, VLNK, &fdi);
+    fuse_invalidate_attr(dvp);
+
+    return err;
 }
 
 /*
@@ -1803,10 +1833,10 @@ fuse_vnop_symlink(struct vop_symlink_args *ap)
 static int
 fuse_vnop_write(struct vop_write_args *ap)
 {
-    struct vnode *vp = ap->a_vp;
-    struct ucred *cred = ap->a_cred;
-    struct uio *uio = ap->a_uio;
-    int ioflag = ap->a_ioflag;
+    struct vnode *vp      = ap->a_vp;
+    struct uio   *uio     = ap->a_uio;
+    int           ioflag  = ap->a_ioflag;
+    struct ucred *cred    = ap->a_cred;
 
     fuse_trace_printf_vnop();
 
@@ -2114,7 +2144,7 @@ fuse_vnop_print(struct vop_print_args *ap)
 	       (uintmax_t)fvdat->nlookup,
 	       fvdat->flags);
 
-	return (0);
+	return 0;
 }
 
 /*

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Google. All Rights Reserved.
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
  * Amit Singh <singh@>
  */
 
@@ -86,6 +86,46 @@ uio_setresid(struct uio *uio, ssize_t resid)
     uio->uio_resid = resid;
 }
 
+/* time */
+
+#define fuse_timespec_add(vvp, uvp)            \
+    do {                                       \
+           (vvp)->tv_sec += (uvp)->tv_sec;     \
+           (vvp)->tv_nsec += (uvp)->tv_nsec;   \
+           if ((vvp)->tv_nsec >= 1000000000) { \
+               (vvp)->tv_sec++;                \
+               (vvp)->tv_nsec -= 1000000000;   \
+           }                                   \
+    } while (0)
+
+#define fuse_timespec_cmp(tvp, uvp, cmp)       \
+        (((tvp)->tv_sec == (uvp)->tv_sec) ?    \
+         ((tvp)->tv_nsec cmp (uvp)->tv_nsec) : \
+         ((tvp)->tv_sec cmp (uvp)->tv_sec))
+
+/* miscellaneous */
+
+#define fuse_isdeadfs_nop(vp) 0
+
+static __inline__
+int
+fuse_isdeadfs(struct vnode *vp)
+{
+    struct mount *mp = vnode_mount(vp);
+    struct fuse_data *data = fusefs_get_data(mp);
+
+    return (data->dataflags & FSESS_KICK);
+}
+
+static __inline__
+int
+fuse_isdeadfs_mp(struct mount *mp)
+{
+    struct fuse_data *data = fusefs_get_data(mp);
+
+    return (data->dataflags & FSESS_KICK);
+}
+
 /* access */
 
 #define FVP_ACCESS_NOOP   0x01
@@ -100,10 +140,24 @@ uio_setresid(struct uio *uio, ssize_t resid)
 #define FACCESS_XQUERIES FACCESS_STICKY | FACCESS_CHOWN | FACCESS_SETGID
 
 struct fuse_access_param {
-    uid_t xuid;
-    gid_t xgid;
-    unsigned facc_flags;
+    uid_t    xuid;
+    gid_t    xgid;
+    uint32_t facc_flags;
 };
+
+static __inline int
+fuse_match_cred(struct ucred *basecred, struct ucred *usercred)
+{
+	if (basecred->cr_uid == usercred->cr_uid             &&
+	    basecred->cr_uid == usercred->cr_ruid            &&
+	    basecred->cr_uid == usercred->cr_svuid           &&
+	    basecred->cr_groups[0] == usercred->cr_groups[0] &&
+	    basecred->cr_groups[0] == usercred->cr_rgid      &&
+	    basecred->cr_groups[0] == usercred->cr_svgid)
+		return 0;
+
+	return EPERM;
+}
 
 int
 fuse_internal_access(struct vnode *vp,
@@ -152,15 +206,6 @@ fuse_internal_attr_fat2vat(struct mount *mp,
     vap->va_flags = 0;
 }
 
-#define timespecadd(vvp, uvp)                  \
-    do {                                       \
-           (vvp)->tv_sec += (uvp)->tv_sec;     \
-           (vvp)->tv_nsec += (uvp)->tv_nsec;   \
-           if ((vvp)->tv_nsec >= 1000000000) { \
-               (vvp)->tv_sec++;                \
-               (vvp)->tv_nsec -= 1000000000;   \
-           }                                   \
-    } while (0)
 
 #define cache_attrs(vp, fuse_out) do {                                         \
     struct timespec uptsp_ ## __func__;                                        \
@@ -169,7 +214,7 @@ fuse_internal_attr_fat2vat(struct mount *mp,
     VTOFUD(vp)->cached_attrs_valid.tv_nsec = (fuse_out)->attr_valid_nsec;      \
     nanouptime(&uptsp_ ## __func__);                                           \
                                                                                \
-    timespecadd(&VTOFUD(vp)->cached_attrs_valid, &uptsp_ ## __func__);         \
+    fuse_timespec_add(&VTOFUD(vp)->cached_attrs_valid, &uptsp_ ## __func__);   \
                                                                                \
     fuse_internal_attr_fat2vat(vnode_mount(vp), &(fuse_out)->attr, VTOVA(vp)); \
 } while (0)
@@ -235,22 +280,22 @@ fuse_internal_checkentry(struct fuse_entry_out *feo, enum vtype vtyp)
     if (vtyp != IFTOVT(feo->attr.mode)) {
         DEBUGX(FUSE_DEBUG_INTERNAL,
             "EINVAL -- %x != %x\n", vtyp, IFTOVT(feo->attr.mode));
-        return (EINVAL);
+        return EINVAL;
     }
 
     if (feo->nodeid == FUSE_NULL_ID) {
         DEBUGX(FUSE_DEBUG_INTERNAL,
             "EINVAL -- feo->nodeid is NULL\n");
-        return (EINVAL);
+        return EINVAL;
     }
 
     if (feo->nodeid == FUSE_ROOT_ID) {
         DEBUGX(FUSE_DEBUG_INTERNAL,
             "EINVAL -- feo->nodeid is FUSE_ROOT_ID\n");
-        return (EINVAL);
+        return EINVAL;
     }
 
-    return (0);
+    return 0;
 }
 
 int
@@ -295,28 +340,5 @@ fuse_internal_forget_send(struct mount *mp,
 
 int fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio);
 void fuse_internal_send_init(struct fuse_data *data, struct thread *td);
-
-/* miscellaneous */
-
-#define fuse_isdeadfs_nop(vp) 0
-
-static __inline__
-int
-fuse_isdeadfs(struct vnode *vp)
-{
-    struct mount *mp = vnode_mount(vp);
-    struct fuse_data *data = fusefs_get_data(mp);
-
-    return (data->dataflag & FSESS_KICK);
-}
-
-static __inline__
-int
-fuse_isdeadfs_mp(struct mount *mp)
-{
-    struct fuse_data *data = fusefs_get_data(mp);
-
-    return (data->dataflag & FSESS_KICK);
-}
 
 #endif /* _FUSE_INTERNAL_H_ */

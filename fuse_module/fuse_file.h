@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Google. All Rights Reserved.
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
  * Amit Singh <singh@>
  */
 
@@ -25,16 +25,17 @@ typedef enum fufh_type {
 #define FUFH_STRATEGY 0x00000004
 
 struct fuse_filehandle {
-    uint64_t    fh_id;
+    uint64_t fh_id;
+    int      open_count;
+    int      open_flags;
+    int      fuse_open_flags;
     fufh_type_t type;
-    int         fufh_flags;
-    int         open_count;
-    int         open_flags;
-    int         fuse_open_flags;
+    int      fufh_flags;
 };
 typedef struct fuse_filehandle * fuse_filehandle_t;
 
-static __inline__ fufh_type_t
+static __inline__
+fufh_type_t
 fuse_filehandle_xlate_from_mmap(int fflags)
 {
     if (fflags & (PROT_READ | PROT_WRITE)) {
@@ -48,7 +49,8 @@ fuse_filehandle_xlate_from_mmap(int fflags)
     }
 }
 
-static __inline__ fufh_type_t
+static __inline__
+fufh_type_t
 fuse_filehandle_xlate_from_fflags(int fflags)
 {
     if ((fflags & FREAD) && (fflags & FWRITE)) {
@@ -58,25 +60,30 @@ fuse_filehandle_xlate_from_fflags(int fflags)
     } else if (fflags & (FREAD)) {
         return FUFH_RDONLY;
     } else {
-        panic("What kind of a flag is this?");
+        panic("FUSE: What kind of a flag is this (%x)?", fflags);
     }
 }
 
-static __inline__ int
+static __inline__
+int
 fuse_filehandle_xlate_to_oflags(fufh_type_t type)
 {
     int oflags = -1;
 
     switch (type) {
+
     case FUFH_RDONLY:
         oflags = O_RDONLY;
         break;
+
     case FUFH_WRONLY:
         oflags = O_WRONLY;
         break;
+
     case FUFH_RDWR:
         oflags = O_RDWR;
         break;
+
     default:
         break;
     }

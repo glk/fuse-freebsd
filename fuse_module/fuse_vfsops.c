@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
+ * Amit Singh <singh@>
+ */
+
 #include "config.h"
 
 #include <sys/types.h>
@@ -43,16 +48,16 @@
 #define PRIV_VFS_FUSE_SYNC_UNMOUNT PRIV_VFS_MOUNT_NONUSER
 #endif
 
-static vfs_mount_t fuse_vfs_mount;
-static vfs_unmount_t fuse_vfs_unmount;
-static vfs_root_t fuse_vfs_root;
-static vfs_statfs_t fuse_vfs_statfs;
+static vfs_mount_t fuse_vfsop_mount;
+static vfs_unmount_t fuse_vfsop_unmount;
+static vfs_root_t fuse_vfsop_root;
+static vfs_statfs_t fuse_vfsop_statfs;
 
 struct vfsops fuse_vfsops = {
-	.vfs_mount   = fuse_vfs_mount,
-	.vfs_unmount = fuse_vfs_unmount,
-	.vfs_root    = fuse_vfs_root,
-	.vfs_statfs  = fuse_vfs_statfs,
+	.vfs_mount   = fuse_vfsop_mount,
+	.vfs_unmount = fuse_vfsop_unmount,
+	.vfs_root    = fuse_vfsop_root,
+	.vfs_statfs  = fuse_vfsop_statfs,
 };
 
 SYSCTL_INT(_vfs_fuse, OID_AUTO, init_backgrounded, CTLFLAG_RD,
@@ -73,14 +78,15 @@ MALLOC_DEFINE(M_FUSEVFS, "fuse_filesystem", "buffer for fuse vfs layer");
 } while (0)
 
 static int
-fuse_vfs_mount(struct mount *mp)
+fuse_vfsop_mount(struct mount *mp)
 {
+    int err     = 0;
+    int mntopts = 0;
+    int __mntopts = 0;
+    int max_read_set = 0;
+    uint32_t max_read = ~0;
+
     size_t len;
-    int err               = 0;
-    int mntopts           = 0;
-    int __mntopts         = 0;
-    int max_read_set      = 0;
-    unsigned int max_read = ~0;
 
     struct cdev *fdev;
     struct fuse_data *data;
@@ -97,23 +103,23 @@ fuse_vfs_mount(struct mount *mp)
         ("negative fuse usecount despite Giant"));
 
     if (mp->mnt_flag & MNT_UPDATE)
-        return (EOPNOTSUPP);
+        return EOPNOTSUPP;
 
     mp->mnt_flag |= MNT_SYNCHRONOUS; 
     /* Get the new options passed to mount */
     opts = mp->mnt_optnew;
 
     if (!opts)
-        return (EINVAL);
+        return EINVAL;
 
     /* `fspath' contains the mount point (eg. /mnt/fuse/sshfs); REQUIRED */
     if (!vfs_getopts(opts, "fspath", &err))
-        return (err);
+        return err;
 
     /* `from' contains the device name (eg. /dev/fuse0); REQUIRED */
     fspec = vfs_getopts(opts, "from", &err);
     if (!fspec)
-        return (err);
+        return err;
 
     mp->mnt_data = NULL;
 
@@ -124,13 +130,13 @@ fuse_vfs_mount(struct mount *mp)
 
     NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, td);
     if ((err = namei(ndp)) != 0)
-        return (err);
+        return err;
     NDFREE(ndp, NDF_ONLY_PNBUF);
     devvp = ndp->ni_vp;
 
     if (devvp->v_type != VCHR) {
         vrele(devvp);
-        return (ENXIO);
+        return ENXIO;
     }
 
     fdev = devvp->v_rdev;
@@ -157,7 +163,7 @@ fuse_vfs_mount(struct mount *mp)
             err = VOP_ACCESS(devvp, VREAD|VWRITE, td->td_ucred, td);
         if (err) {
             vrele(devvp);
-            return (err);
+            return err;
         }
     }
 
@@ -171,17 +177,17 @@ fuse_vfs_mount(struct mount *mp)
     if (!fdev->si_devsw ||
         strcmp("fuse", fdev->si_devsw->d_name)) {
         FUSE_UNLOCK();
-        return (ENXIO);
+        return ENXIO;
     }
 
     data = fusedev_get_data(fdev);
-    if (data && data->dataflag & FSESS_OPENED) {
+    if (data && data->dataflags & FSESS_OPENED) {
         data->mntco++;
         debug_printf("a.inc:mntco = %d\n", data->mntco);
     } else {
         FUSE_UNLOCK();
         dev_rel(fdev);
-        return (ENXIO);
+        return ENXIO;
     }	
     FUSE_UNLOCK();
 
@@ -233,11 +239,11 @@ fuse_vfs_mount(struct mount *mp)
 
     data->mp = mp;
     data->mpri = FM_PRIMARY;
-    data->dataflag |= mntopts;
+    data->dataflags |= mntopts;
     data->max_read = max_read;
 #ifdef XXXIP
     if (!priv_check(td, PRIV_VFS_FUSE_SYNC_UNMOUNT))
-        data->dataflag |= FSESS_CAN_SYNC_UNMOUNT;
+        data->dataflags |= FSESS_CAN_SYNC_UNMOUNT;
 #endif
 
     vfs_getnewfsid(mp);	
@@ -260,24 +266,24 @@ out:
     if (err) {
         data->mntco--;
         FUSE_LOCK();
-        if (data->mntco == 0 && ! (data->dataflag & FSESS_OPENED)) {
+        if (data->mntco == 0 && ! (data->dataflags & FSESS_OPENED)) {
             fdev->si_drv1 = NULL;
             fdata_destroy(data);
         }
         FUSE_UNLOCK();
         dev_rel(fdev);
     }
-    return (err);
+    return err;
 }
 
 static int
-fuse_vfs_unmount(struct mount *mp, int mntflags)
+fuse_vfsop_unmount(struct mount *mp, int mntflags)
 {
-    int err   = 0;
-    int flags = 0;
+    int   err        = 0;
+    int   flags      = 0;
 
-    struct fuse_data      *data;
     struct cdev           *fdev;
+    struct fuse_data      *data;
     struct fuse_dispatcher fdi;
     struct thread         *td = curthread;
 
@@ -298,7 +304,7 @@ fuse_vfs_unmount(struct mount *mp, int mntflags)
     err = vflush(mp, 0, flags, td);
     if (err) {
         debug_printf("vflush failed");
-        return (err);
+        return err;
     }
 
     if (fdata_kick_get(data)) {
@@ -307,6 +313,7 @@ fuse_vfs_unmount(struct mount *mp, int mntflags)
 
     fdisp_init(&fdi, 0);
     fdisp_make(&fdi, FUSE_DESTROY, mp, 0, td, NULL);
+
     err = fdisp_wait_answ(&fdi);
     if (!err) {
         fuse_ticket_drop(fdi.tick);
@@ -320,7 +327,7 @@ alreadydead:
 
     FUSE_LOCK();
     fdev = data->fdev;
-    if (data->mntco == 0 && !(data->dataflag & FSESS_OPENED)) {
+    if (data->mntco == 0 && !(data->dataflags & FSESS_OPENED)) {
         data->fdev->si_drv1 = NULL;
         fdata_destroy(data);
     }
@@ -333,30 +340,31 @@ alreadydead:
 
     dev_rel(fdev);
 
-    return (0);
+    return 0;
 }        
 
 static int
-fuse_vfs_root(struct mount *mp, int lkflags, struct vnode **vpp)
+fuse_vfsop_root(struct mount *mp, int lkflags, struct vnode **vpp)
 {
-    int err;
+    int err = 0;
 
     err = fuse_vnode_get(mp, FUSE_ROOT_ID, NULL, vpp, NULL, VDIR, 0);
-    return (err);
+    return err;
 }
 
 static int
-fuse_vfs_statfs(struct mount *mp, struct statfs *sbp)
+fuse_vfsop_statfs(struct mount *mp, struct statfs *sbp)
 {
     struct fuse_dispatcher fdi;
+    int err     = 0;
+
     struct fuse_statfs_out *fsfo;
-    struct fuse_data *data;
-    int err = 0;	
+    struct fuse_data       *data;
 
     DEBUG2G("mp %p: %s\n", mp, mp->mnt_stat.f_mntfromname);
     data = fusefs_get_data(mp);
 
-    if (!(data->dataflag & FSESS_INITED))
+    if (!(data->dataflags & FSESS_INITED))
         goto fake;
 
     if ((err = fdisp_simple_vfs_statfs(&fdi, mp))) {
@@ -368,7 +376,7 @@ fuse_vfs_statfs(struct mount *mp, struct statfs *sbp)
              */
             goto fake;
         }
-        return (err);
+        return err;
     }
 
     fsfo = fdi.answ;
@@ -389,7 +397,7 @@ fuse_vfs_statfs(struct mount *mp, struct statfs *sbp)
 
     fuse_ticket_drop(fdi.tick);
 
-    return (0);
+    return 0;
 fake:
     sbp->f_blocks  = 0;
     sbp->f_bfree   = 0;
@@ -399,5 +407,5 @@ fake:
     sbp->f_namemax = 0;
     sbp->f_bsize   = FUSE_DEFAULT_BLOCKSIZE;
 
-    return (0);
+    return 0;
 }

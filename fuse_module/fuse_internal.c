@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Google. All Rights Reserved.
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
  * Amit Singh <singh@>
  */
 
@@ -50,9 +50,6 @@ static int isbzero(void *buf, size_t len);
 
 /* access */
 
-static __inline int     fuse_match_cred(struct ucred *daemoncred,
-                                        struct ucred *usercred);
-
 int
 fuse_internal_access(struct vnode *vp,
                      mode_t mode,
@@ -62,7 +59,7 @@ fuse_internal_access(struct vnode *vp,
 {
     int err = 0;
     uint32_t mask = 0;
-    int dataflag;
+    int dataflags;
     int vtype;
     struct mount *mp;
     struct fuse_dispatcher fdi;
@@ -79,7 +76,7 @@ fuse_internal_access(struct vnode *vp,
     vtype = vnode_vtype(vp);
 
     data = fusefs_get_data(mp);
-    dataflag = data->dataflag;
+    dataflags = data->dataflags;
 
     if ((mode & VWRITE) && vfs_isrdonly(mp)) {
         return EACCES;
@@ -87,7 +84,7 @@ fuse_internal_access(struct vnode *vp,
 
     // Unless explicitly permitted, deny everyone except the fs owner.
     if (vnode_isvroot(vp) && !(facp->facc_flags & FACCESS_NOCHECKSPY)) {
-        if (!(dataflag & FSESS_DAEMON_CAN_SPY)) {
+        if (!(dataflags & FSESS_DAEMON_CAN_SPY)) {
             int denied = fuse_match_cred(data->daemoncred,
                                          cred);
             if (denied) {
@@ -111,12 +108,12 @@ fuse_internal_access(struct vnode *vp,
 #endif
     }
 
-    if (fusefs_get_data(mp)->dataflag & FSESS_NOACCESS) {
+    if (fusefs_get_data(mp)->dataflags & FSESS_NOACCESS) {
         // Let the kernel handle this.
         return 0;
     }
 
-    if (dataflag & FSESS_DEFAULT_PERMISSIONS) {
+    if (dataflags & FSESS_DEFAULT_PERMISSIONS) {
         // Let the kernel handle this.
         return 0;
     }
@@ -152,33 +149,11 @@ fuse_internal_access(struct vnode *vp,
     }
 
     if (err == ENOSYS) {
-        fusefs_get_data(mp)->dataflag |= FSESS_NOACCESS;
+        fusefs_get_data(mp)->dataflags |= FSESS_NOACCESS;
         err = 0; // ENOTSUP;
     }
 
     return err;
-}
-
-/*
- * An access check routine based on fuse_allow_task() of the Linux module.
- * Now we use this one rather than the more permissive function we used to
- * (and which seemed more logical to me), to ensure uniform behaviour on Linux
- * and FreeBSD.
- *
- * Non-null return value indicates error (ie., "not allowed").
- */
-static __inline int
-fuse_match_cred(struct ucred *basecred, struct ucred *usercred)
-{
-	if (basecred->cr_uid == usercred->cr_uid             &&
-	    basecred->cr_uid == usercred->cr_ruid            &&
-	    basecred->cr_uid == usercred->cr_svuid           &&
-	    basecred->cr_groups[0] == usercred->cr_groups[0] &&
-	    basecred->cr_groups[0] == usercred->cr_rgid      &&
-	    basecred->cr_groups[0] == usercred->cr_svgid)
-		return (0);
-
-	return (EPERM);
 }
 
 /* fsync */
@@ -189,7 +164,7 @@ fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio)
     fuse_trace_printf_func();
 
     if (tick->tk_aw_ohead.error == ENOSYS) {
-        tick->tk_data->dataflag |= (fticket_opcode(tick) == FUSE_FSYNC) ?
+        tick->tk_data->dataflags |= (fticket_opcode(tick) == FUSE_FSYNC) ?
                                         FSESS_NOFSYNC : FSESS_NOFSYNCDIR;
     }
 
@@ -213,7 +188,7 @@ fuse_internal_fsync(struct vnode           *vp,
 
     fdip->iosize = sizeof(*ffsi);
     fdip->tick = NULL;
-    if (vnode_vtype(vp) == VDIR) {
+    if (vnode_isdir(vp)) {
         op = FUSE_FSYNCDIR;
     }
     
@@ -221,7 +196,7 @@ fuse_internal_fsync(struct vnode           *vp,
     ffsi = fdip->indata;
     ffsi->fh = fufh->fh_id;
 
-    ffsi->fsync_flags = 1;
+    ffsi->fsync_flags = 1; /* datasync */
   
     fuse_insert_callback(fdip->tick, fuse_internal_fsync_callback);
     fuse_insert_message(fdip->tick);
@@ -243,7 +218,7 @@ fuse_internal_readdir(struct vnode           *vp,
     struct fuse_read_in   *fri;
 
     if (uio_resid(uio) == 0) {
-        return (0);
+        return 0;
     }
 
     fdisp_init(&fdi, 0);
@@ -293,7 +268,7 @@ fuse_internal_readdir_processdata(struct uio *uio,
     struct fuse_iov    *cookediov = param;
     
     if (bufsize < FUSE_NAME_OFFSET) {
-        return (-1);
+        return -1;
     }
 
     for (;;) {
@@ -303,10 +278,10 @@ fuse_internal_readdir_processdata(struct uio *uio,
             break;
         }
 
-        cou++;
-
         fudge = (struct fuse_dirent *)buf;
         freclen = FUSE_DIRENT_SIZE(fudge);
+
+        cou++;
 
         if (bufsize < freclen) {
             err = ((cou == 1) ? -1 : 0);
@@ -336,9 +311,9 @@ fuse_internal_readdir_processdata(struct uio *uio,
         fiov_adjust(cookediov, bytesavail);
 
         de = (struct dirent *)cookediov->base;
-        de->d_fileno = fudge->ino; /* XXX cast from 64 to 32 bits */
+        de->d_fileno = fudge->ino; /* XXX: truncation */
         de->d_reclen = bytesavail;
-        de->d_type = fudge->type; 
+        de->d_type   = fudge->type;
         de->d_namlen = fudge->namelen;
         memcpy((char *)cookediov->base + sizeof(struct dirent) - MAXNAMLEN - 1,
                (char *)buf + FUSE_NAME_OFFSET, fudge->namelen);
@@ -354,14 +329,14 @@ fuse_internal_readdir_processdata(struct uio *uio,
         uio_setoffset(uio, fudge->off);
     }
 
-    return (err);
+    return err;
 }
 
 /* remove */
 
 #ifdef XXXIP
 static int
-fuse_unlink_callback(struct vnode *vp, void *cargs)
+fuse_internal_remove_callback(struct vnode *vp, void *cargs)
 {
     struct vattr *vap;
     uint64_t target_nlink;
@@ -370,7 +345,8 @@ fuse_unlink_callback(struct vnode *vp, void *cargs)
 
     target_nlink = *(uint64_t *)cargs;
 
-    if ((vap->va_nlink == target_nlink) && (vnode_vtype(vp) == VREG)) {
+    /* somewhat lame "heuristics", but you got better ideas? */
+    if ((vap->va_nlink == target_nlink) && vnode_isreg(vp)) {
         fuse_invalidate_attr(vp);
     }
 
@@ -386,6 +362,7 @@ fuse_internal_remove(struct vnode *dvp,
                      enum fuse_opcode op)
 {
     struct fuse_dispatcher fdi;
+
     struct vattr *vap = VTOVA(vp);
 #if INVALIDATE_CACHED_VATTRS_UPON_UNLINK
     int need_invalidate = 0;
@@ -415,16 +392,24 @@ fuse_internal_remove(struct vnode *dvp,
     fuse_invalidate_attr(dvp);
     fuse_invalidate_attr(vp);
 
-#if INVALIDATE_CACHED_VATTRS_UPON_UNLINK
 #ifdef XXXIP
+    /*
+     * XXX: INVALIDATE_CACHED_VATTRS_UPON_UNLINK
+     *
+     * Consider the case where vap->va_nlink > 1 for the entity being
+     * removed. In our world, other in-memory vnodes that share a link
+     * count each with this one may not know right way that this one just
+     * got deleted. We should let them know, say, through a vnode_iterate()
+     * here and a callback that does fuse_invalidate_attr(vp) on each
+     * relevant vnode.
+     */
     if (need_invalidate && !err) {
-        vnode_iterate(vnode_mount(vp), 0, fuse_unlink_callback,
+        vnode_iterate(vnode_mount(vp), 0, fuse_internal_remove_callback,
                       (void *)&target_nlink);
     }
 #endif
-#endif
 
-    return (err);
+    return err;
 }
 
 /* rename */
@@ -461,7 +446,7 @@ fuse_internal_rename(struct vnode *fdvp,
         fuse_invalidate_attr(tdvp);
     }
 
-    return (err);
+    return err;
 }
 
 /* strategy */
@@ -500,10 +485,8 @@ fuse_internal_newentry_core(struct vnode *dvp,
     struct fuse_entry_out *feo;
     struct mount *mp = vnode_mount(dvp);
 
-    debug_printf("fdip=%p\n", fdip);
-
     if ((err = fdisp_wait_answ(fdip))) {
-        return (err);
+        return err;
     }
         
     feo = fdip->answ;
@@ -512,8 +495,7 @@ fuse_internal_newentry_core(struct vnode *dvp,
         goto out;
     }
 
-    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp,
-	vtyp, 0);
+    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, vtyp, 0);
     if (err) {
         fuse_internal_forget_send(mp, cnp->cn_thread, cnp->cn_cred, feo->nodeid, 1, fdip);
         return err;
@@ -534,33 +516,32 @@ fuse_internal_newentry(struct vnode *dvp,
                        enum fuse_opcode op,
                        void *buf,
 		       size_t bufsize,
-                       enum vtype vtyp)
+                       enum vtype vtype)
 {
     int err;
     struct fuse_dispatcher fdi;
+    struct mount *mp = vnode_mount(dvp);
 
     fdisp_init(&fdi, 0);
-    fuse_internal_newentry_makerequest(vnode_mount(dvp), VTOI(dvp), cnp,
-	                               op, buf, bufsize, &fdi);
-    err = fuse_internal_newentry_core(dvp, vpp, cnp, vtyp, &fdi);
+    fuse_internal_newentry_makerequest(mp, VTOI(dvp), cnp, op, buf,
+	                               bufsize, &fdi);
+    err = fuse_internal_newentry_core(dvp, vpp, cnp, vtype, &fdi);
     fuse_invalidate_attr(dvp);
 
-    return (err);
+    return err;
 }
 
 /* entity destruction */
 
 int
-fuse_internal_forget_callback(struct fuse_ticket *tick, struct uio *uio)
+fuse_internal_forget_callback(struct fuse_ticket *ftick, struct uio *uio)
 {
     struct fuse_dispatcher fdi;
 
-    debug_printf("tick=%p, uio=%p\n", tick, uio);
+    fdi.tick = ftick;
 
-    fdi.tick = tick;
-    fuse_internal_forget_send(tick->tk_data->mp, curthread, NULL,
-                     ((struct fuse_in_header *)tick->tk_ms_fiov.base)->nodeid,
-                     1, &fdi);
+    fuse_internal_forget_send(ftick->tk_data->mp, curthread, NULL,
+        ((struct fuse_in_header *)ftick->tk_ms_fiov.base)->nodeid, 1, &fdi);
 
     return 0;
 }
@@ -641,11 +622,11 @@ out:
     }
 
     mtx_lock(&data->ticket_mtx);
-    data->dataflag |= FSESS_INITED;
+    data->dataflags |= FSESS_INITED;
     wakeup(&data->ticketer);
     mtx_unlock(&data->ticket_mtx);
 
-    return (0);
+    return 0;
 }
 
 void

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Google. All Rights Reserved.
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
  * Amit Singh <singh@>
  */
 
@@ -14,25 +14,41 @@
 #define FN_CREATING      0x00000001
 
 struct fuse_vnode_data {
+    /** self **/
     uint64_t   nid;
-    uint64_t   nlookup;
-    enum vtype vtype;
+
+    /** parent **/
     /* XXXIP very likely to be stale, it's not updated in rename() */
     uint64_t   parent_nid;
 
-    struct mtx createlock;
-    lwpid_t    creator;
+    /** I/O **/
+    struct     fuse_filehandle fufh[FUFH_MAXTYPE];
+
+    /** flags **/
     /* XXX: Clean up this multi-flag nonsense. Really. */
-    int        flag;
+    uint32_t   flag;
     int        flags;
     uint32_t   c_flag;
+
+    /** meta **/
+
+    struct timespec   cached_attrs_valid;
+    struct vattr      cached_attrs;
+    off_t             filesize;
+    uint64_t          nlookup;
+    enum vtype        vtype;
+
+    /** locking **/
+
+    struct mtx createlock;
+    lwpid_t    creator;
 
     /*
      * The nodelock must be held when data in the FUSE node is accessed or
      * modified. Typically, we would take this lock at the beginning of a
      * vnop and drop it at the end of the vnop.
      */
-    struct sx nodelock;
+    struct sx  nodelock;
     void      *nodelockowner;
 
     /*
@@ -40,23 +56,18 @@ struct fuse_vnode_data {
      * file resize) unexpectedly.
      */
     struct sx  truncatelock;
-
-    off_t      filesize; 
-
-    struct     fuse_filehandle fufh[3];
-
-    struct vattr      cached_attrs;
-    struct timespec   cached_attrs_valid;
 };
 
-#define VTOFUD(vp)  ((struct fuse_vnode_data *)((vp)->v_data))
+#define VTOFUD(vp) \
+    ((struct fuse_vnode_data *)((vp)->v_data))
 #define VTOI(vp)    (VTOFUD(vp)->nid)
 #define VTOVA(vp)   (&(VTOFUD(vp)->cached_attrs))
 #define VTOILLU(vp) ((uint64_t)(VTOFUD(vp) ? VTOI(vp) : 0))
 
 #define FUSE_NULL_ID 0
 
-static __inline void
+static __inline__
+void
 fuse_invalidate_attr(struct vnode *vp)
 {
     if (VTOFUD(vp)) {
@@ -65,10 +76,12 @@ fuse_invalidate_attr(struct vnode *vp)
 }
 
 struct get_filehandle_param {
+
     enum fuse_opcode opcode;
     uint8_t          do_gc:1;
     uint8_t          do_new:1;
-    int explicitidentity;
+
+    int   explicitidentity;
     pid_t pid;
     uid_t uid;
     gid_t gid;

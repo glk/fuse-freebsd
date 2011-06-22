@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Google. All Rights Reserved.
+ * Copyright (C) 2006-2008 Google. All Rights Reserved.
  * Amit Singh <singh@>
  */
 
@@ -30,14 +30,14 @@ do {                                                   \
 struct fuse_ticket;
 struct fuse_data;
 
-typedef	int fuse_handler_t(struct fuse_ticket *tick, struct uio *uio);
+typedef int fuse_handler_t(struct fuse_ticket *ftick, struct uio *uio);
 
 struct fuse_ticket {
     /* fields giving the identity of the ticket */
     uint64_t                     tk_unique;
     struct fuse_data            *tk_data;
     int                          tk_flag;
-    unsigned int                 tk_age;
+    uint32_t                     tk_age;
 
     STAILQ_ENTRY(fuse_ticket)    tk_freetickets_link;
     TAILQ_ENTRY(fuse_ticket)     tk_alltickets_link;
@@ -62,46 +62,51 @@ struct fuse_ticket {
     TAILQ_ENTRY(fuse_ticket)     tk_aw_link;
 };
 
-#define FT_ANSW  0x01  /* request of ticket has already been answered */
-#define FT_INVAL 0x02  /* ticket is not owned */
-#define FT_DIRTY 0x04  /* ticket has been used */
+#define FT_ANSW  0x01  // request of ticket has already been answered
+#define FT_INVAL 0x02  // ticket is invalidated
+#define FT_DIRTY 0x04  // ticket has been used
 
-static __inline struct fuse_iov *
-fticket_resp(struct fuse_ticket *tick)
+static __inline__
+struct fuse_iov *
+fticket_resp(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    return (&tick->tk_aw_fiov);
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    return (&ftick->tk_aw_fiov);
 }
 
-static __inline int
-fticket_answered(struct fuse_ticket *tick)
+static __inline__
+int
+fticket_answered(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    return (tick->tk_flag & FT_ANSW);
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    return (ftick->tk_flag & FT_ANSW);
 }
 
-static __inline void
-fticket_set_answered(struct fuse_ticket *tick)
+static __inline__
+void
+fticket_set_answered(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    tick->tk_flag |= FT_ANSW;
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    ftick->tk_flag |= FT_ANSW;
 }
 
-static __inline enum fuse_opcode
-fticket_opcode(struct fuse_ticket *tick)
+static __inline__
+enum fuse_opcode
+fticket_opcode(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    return (((struct fuse_in_header *)(tick->tk_ms_fiov.base))->opcode);
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    return (((struct fuse_in_header *)(ftick->tk_ms_fiov.base))->opcode);
 }
 
-static __inline void
-fticket_invalidate(struct fuse_ticket *tick)
+static __inline__
+void
+fticket_invalidate(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    tick->tk_flag |= FT_INVAL;
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    ftick->tk_flag |= FT_INVAL;
 }
 
-int fticket_pull(struct fuse_ticket *tick, struct uio *uio);
+int fticket_pull(struct fuse_ticket *ftick, struct uio *uio);
 
 enum mountpri { FM_NOMOUNTED, FM_PRIMARY, FM_SECONDARY };
 
@@ -109,12 +114,12 @@ enum mountpri { FM_NOMOUNTED, FM_PRIMARY, FM_SECONDARY };
  * The data representing a FUSE session.
  */
 struct fuse_data {
-    enum mountpri              mpri;
-    int                        mntco;
     struct cdev               *fdev;
     struct mount              *mp;
+    enum mountpri              mpri;
+    int                        mntco;
     struct ucred              *daemoncred;
-    int                        dataflag;
+    int                        dataflags;
 
     struct mtx                 ms_mtx;
     STAILQ_HEAD(, fuse_ticket) ms_head;
@@ -161,13 +166,15 @@ struct fuse_data {
 #define FSESS_NO_READAHEAD        0x2000 // no readaheads
 #define FSESS_NO_UBC              0x4000 // no caching
 
-static __inline struct fuse_data *
+static __inline__
+struct fuse_data *
 fusedev_get_data(struct cdev *fdev)
 {
 	return (fdev->si_drv1);
 }
 
-static __inline struct fuse_data *
+static __inline__
+struct fuse_data *
 fusefs_get_data(struct mount *mp)
 {
     struct fuse_data *data = mp->mnt_data;
@@ -175,86 +182,76 @@ fusefs_get_data(struct mount *mp)
     return (data->mpri == FM_PRIMARY ? data : NULL);
 }
 
-static __inline void
-fuse_ms_push(struct fuse_ticket *tick)
+static __inline__
+void
+fuse_ms_push(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    STAILQ_INSERT_TAIL(&tick->tk_data->ms_head, tick, tk_ms_link);
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    STAILQ_INSERT_TAIL(&ftick->tk_data->ms_head, ftick, tk_ms_link);
 }
 
-static __inline struct fuse_ticket *
+static __inline__
+struct fuse_ticket *
 fuse_ms_pop(struct fuse_data *data)
 {
-    struct fuse_ticket *tick;
+    struct fuse_ticket *ftick = NULL;
 
     DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
 
-    if ((tick = STAILQ_FIRST(&data->ms_head))) {
+    if ((ftick = STAILQ_FIRST(&data->ms_head))) {
         STAILQ_REMOVE_HEAD(&data->ms_head, tk_ms_link);
     }
 
-    return (tick);
+    return ftick;
 }
 
-static __inline void
-fuse_aw_push(struct fuse_ticket *tick)
+static __inline__
+void
+fuse_aw_push(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    TAILQ_INSERT_TAIL(&tick->tk_data->aw_head, tick, tk_aw_link);
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    TAILQ_INSERT_TAIL(&ftick->tk_data->aw_head, ftick, tk_aw_link);
 }
 
-static __inline void
-fuse_aw_remove(struct fuse_ticket *tick)
+static __inline__
+void
+fuse_aw_remove(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> tick=%p\n", tick);
-    TAILQ_REMOVE(&tick->tk_data->aw_head, tick, tk_aw_link);
+    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    TAILQ_REMOVE(&ftick->tk_data->aw_head, ftick, tk_aw_link);
 }
 
-static __inline struct fuse_ticket *
+static __inline__
+struct fuse_ticket *
 fuse_aw_pop(struct fuse_data *data)
 {
-    struct fuse_ticket *tick;
+    struct fuse_ticket *ftick = NULL;
 
     DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
 
-    if ((tick = TAILQ_FIRST(&data->aw_head))) {
-        fuse_aw_remove(tick);
+    if ((ftick = TAILQ_FIRST(&data->aw_head))) {
+        fuse_aw_remove(ftick);
     }
 
-    return (tick);
+    return ftick;
 }
 
 struct fuse_ticket *fuse_ticket_fetch(struct fuse_data *data);
-void fuse_ticket_drop(struct fuse_ticket *tick);
-void fuse_ticket_drop_invalid(struct fuse_ticket *tick);
-void fuse_insert_callback(struct fuse_ticket *tick, fuse_handler_t *handler);
-void fuse_insert_message(struct fuse_ticket *tick);
+void fuse_ticket_drop(struct fuse_ticket *ftick);
+void fuse_ticket_drop_invalid(struct fuse_ticket *ftick);
+void fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t *handler);
+void fuse_insert_message(struct fuse_ticket *ftick);
 
-static __inline int
-fuse_libabi_geq(struct fuse_data *data, uint32_t maj, uint32_t min)
+static __inline__
+int
+fuse_libabi_geq(struct fuse_data *data, uint32_t abi_maj, uint32_t abi_min)
 {
-    return (data->fuse_libabi_major > maj ||
-            (data->fuse_libabi_major == maj && data->fuse_libabi_minor >= min));
-}
-
-struct fuse_secondary_data {
-    enum mountpri     mpri;
-    struct mount     *mp;
-    struct fuse_data *master;
-
-    LIST_ENTRY(fuse_secondary_data) slaves_link;
-};
-
-static __inline struct fuse_secondary_data *
-fusefs_get_secondarydata(struct mount *mp)
-{
-    struct fuse_secondary_data *fsdat = mp->mnt_data;
-    return (fsdat->mpri == FM_SECONDARY ? fsdat : NULL);
+    return (data->fuse_libabi_major > abi_maj ||
+            (data->fuse_libabi_major == abi_maj && data->fuse_libabi_minor >= abi_min));
 }
 
 struct fuse_data *fdata_alloc(struct cdev *dev, struct ucred *cred);
 void fdata_destroy(struct fuse_data *data);
-
 int fdata_kick_get(struct fuse_data *data);
 void fdata_kick_set(struct fuse_data *data);
 
@@ -270,7 +267,8 @@ struct fuse_dispatcher {
     void    *answ;
 };
 
-static __inline void
+static __inline__
+void
 fdisp_init(struct fuse_dispatcher *fdisp, size_t iosize)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> fdisp=%p, iosize=%zx\n", fdisp, iosize);
@@ -292,23 +290,25 @@ void fdisp_make_vp(struct fuse_dispatcher *fdip, enum fuse_opcode op,
 
 int  fdisp_wait_answ(struct fuse_dispatcher *fdip);
 
-static __inline int
+static __inline__
+int
 fdisp_simple_putget_vp(struct fuse_dispatcher *fdip, enum fuse_opcode op,
                     struct vnode *vp, struct thread *td, struct ucred *cred)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> fdip=%p, opcode=%d, vp=%p\n", fdip, op, vp);
     fdisp_init(fdip, 0);
     fdisp_make_vp(fdip, op, vp, td, cred);
-    return (fdisp_wait_answ(fdip));
+    return fdisp_wait_answ(fdip);
 }
 
-static __inline int
+static __inline__
+int
 fdisp_simple_vfs_statfs(struct fuse_dispatcher *fdip,
                          struct mount           *mp)
 {
    fdisp_init(fdip, 0);
    fdisp_make(fdip, FUSE_STATFS, mp, FUSE_ROOT_ID, NULL, NULL);
-   return (fdisp_wait_answ(fdip));
+   return fdisp_wait_answ(fdip);
 }
 
 #endif /* _FUSE_IPC_H_ */

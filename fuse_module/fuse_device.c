@@ -131,7 +131,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 #if ! (DO_GIANT_MANUALLY && USE_FUSE_LOCK)
 		fuse_useco++;
 #endif
-		fdata->dataflag |= FSESS_OPENED;
+		fdata->dataflags |= FSESS_OPENED;
 		dev->si_drv1 = fdata;
 	}	
 	FUSE_UNLOCK();
@@ -166,10 +166,10 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 	data = fusedev_get_data(dev);
 	if (! data)
 		panic("no fuse data upon fuse device close");
-	KASSERT(data->dataflag | FSESS_OPENED,
+	KASSERT(data->dataflags | FSESS_OPENED,
 	        ("fuse device is already closed upon close"));
 	fdata_kick_set(data);
-        data->dataflag &= ~FSESS_OPENED;
+        data->dataflags &= ~FSESS_OPENED;
 	mtx_lock(&data->aw_mtx);
 
 	/* wakup poll()ers */
