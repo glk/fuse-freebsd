@@ -1584,6 +1584,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
     fdisp_init(&fdi, sizeof(*fsai));
     fdisp_make_vp(&fdi, FUSE_SETATTR, vp, td, cred);
     fsai = fdi.indata;
+    fsai->valid = 0;
 
     bzero(&facp, sizeof(facp));
 
