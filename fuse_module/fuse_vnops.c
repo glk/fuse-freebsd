@@ -141,15 +141,27 @@ fuse_vnop_access(struct vop_access_args *ap)
 {
     struct vnode *vp      = ap->a_vp;
     int           accmode = ap->a_accmode;
+    struct ucred *cred    = ap->a_cred;
 
     struct fuse_access_param facp;
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    struct fuse_data *data = fuse_get_mpdata(vnode_mount(vp));
 
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs(vp)) {
         if (vnode_isvroot(vp)) {
             return 0;
+        }
+        return EBADF;
+    }
+
+    if (!(data->dataflags & FSESS_INITED)) {
+        if (vnode_isvroot(vp)) {
+            if (priv_check_cred(cred, PRIV_VFS_ADMIN, 0) ||
+               (fuse_match_cred(data->daemoncred, cred) == 0)) {
+                return 0;
+            }
         }
         return EBADF;
     }
