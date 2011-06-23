@@ -84,6 +84,12 @@ fuse_filehandle_open(struct vnode *vp,
     fuse_fh_upcall_count++;
     if ((err = fdisp_wait_answ(&fdi))) {
         debug_printf("OUCH ... daemon didn't give fh (err = %d)\n", err);
+        if (err == ENOENT) {
+            /*
+             * See comment in fuse_vnop_reclaim().
+             */
+            cache_purge(vp);
+        }
         return err;
     }
 
@@ -148,6 +154,7 @@ fuse_filehandle_close(struct vnode *vp,
 out:
     fufh->fh_id = (uint64_t)-1;
     fufh->fh_type = FUFH_INVALID;
+    fuse_invalidate_attr(vp);
 
     return err;
 }

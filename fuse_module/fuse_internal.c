@@ -88,7 +88,7 @@ fuse_internal_access(struct vnode *vp,
             int denied = fuse_match_cred(data->daemoncred,
                                          cred);
             if (denied) {
-                return EACCES;
+                return EPERM;
             }
         }
         facp->facc_flags |= FACCESS_NOCHECKSPY;
@@ -150,7 +150,7 @@ fuse_internal_access(struct vnode *vp,
 
     if (err == ENOSYS) {
         fuse_get_mpdata(mp)->dataflags |= FSESS_NOACCESS;
-        err = 0; // ENOTSUP;
+        err = 0;
     }
 
     return err;

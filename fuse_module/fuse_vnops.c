@@ -341,6 +341,10 @@ bringup:
 	fuse_vnode_open(*vpp, x_open_flags, td);
     }
 
+    cache_purge_negative(dvp);
+
+    fuse_ticket_drop(fdip->tick);
+
     return 0;
 
 undo:
@@ -1044,6 +1048,10 @@ fuse_vnop_mkdir(struct vop_mkdir_args *ap)
     err = fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKDIR, &fmdi,
                                  sizeof(fmdi), VDIR);
 
+    if (err == 0) {
+        fuse_invalidate_attr(dvp);
+    }
+
     return err;
 }
 
@@ -1078,6 +1086,10 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
 
     err = fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKNOD, &fmni,
                                  sizeof(fmni), vap->va_type);
+
+    if (err== 0) {
+        fuse_invalidate_attr(dvp);
+    }
 
     return err;
 }
@@ -1376,6 +1388,11 @@ fuse_vnop_remove(struct vop_remove_args *ap)
 
     err = fuse_internal_remove(dvp, vp, cnp, FUSE_UNLINK);
 
+    if (err == 0) {
+        cache_purge(vp);
+        fuse_invalidate_attr(dvp);
+    }
+
     return err;
 }
 
@@ -1424,8 +1441,22 @@ fuse_vnop_rename(struct vop_rename_args *ap)
      */
     err = fuse_internal_rename(fdvp, fcnp, tdvp, tcnp);
 
+    if (err == 0) {
+        fuse_invalidate_attr(fdvp);
+        if (tdvp != fdvp) {
+            fuse_invalidate_attr(tdvp);
+        }
+    }
+
     if (tvp != NULL && tvp != fvp) {
         cache_purge(tvp);
+    }
+
+    if (vnode_isdir(fvp)) {
+        if ((tvp != NULL) && vnode_isdir(tvp)) {
+            cache_purge(tdvp);
+        }
+        cache_purge(fdvp);
     }
 
 out:
@@ -1471,6 +1502,10 @@ fuse_vnop_rmdir(struct vop_rmdir_args *ap)
     cache_purge(ap->a_vp);
 
     err = fuse_internal_remove(ap->a_dvp, ap->a_vp, ap->a_cnp, FUSE_RMDIR);
+
+    if (err == 0) {
+        fuse_invalidate_attr(dvp);
+    }
 
     return err;
 }
@@ -1722,7 +1757,10 @@ fuse_vnop_symlink(struct vop_symlink_args *ap)
     memcpy((char *)fdi.indata + cnp->cn_namelen + 1, target, len);
 
     err = fuse_internal_newentry_core(dvp, vpp, cnp, VLNK, &fdi);
-    fuse_invalidate_attr(dvp);
+
+    if (err == 0) {
+        fuse_invalidate_attr(dvp);
+    }
 
     return err;
 }
