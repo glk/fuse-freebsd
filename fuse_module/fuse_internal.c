@@ -621,10 +621,10 @@ out:
         fdata_set_dead(data);
     }
 
-    mtx_lock(&data->ticket_mtx);
+    fuse_lck_mtx_lock(data->ticket_mtx);
     data->dataflags |= FSESS_INITED;
     wakeup(&data->ticketer);
-    mtx_unlock(&data->ticket_mtx);
+    fuse_lck_mtx_unlock(data->ticket_mtx);
 
     return 0;
 }

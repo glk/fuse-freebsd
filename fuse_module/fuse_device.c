@@ -100,19 +100,19 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 	 */
 
 #if DO_GIANT_MANUALLY 
-	mtx_lock(&Giant);
+	fuse_lck_mtx_lock(Giant);
 #endif
 	if (fuse_useco < 0) {
 		/* Module unload is going on */
 #if DO_GIANT_MANUALLY 
-		mtx_unlock(&Giant);
+		fuse_lck_mtx_unlock(Giant);
 #endif
 		DEBUG("caught in the middle of unload\n");
 		return (ENOENT);
 	}
 #if DO_GIANT_MANUALLY && USE_FUSE_LOCK
 	fuse_useco++;
- 	mtx_unlock(&Giant);
+	fuse_lck_mtx_unlock(Giant);
 #endif
 
 	if (dev->si_usecount > 1)
@@ -136,7 +136,7 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 	}	
 	FUSE_UNLOCK();
 #if DO_GIANT_MANUALLY && ! USE_FUSE_LOCK
-	mtx_unlock(&Giant);
+	fuse_lck_mtx_unlock(Giant);
 #endif
 
 	DEBUG("%s: device opened by thread %d.\n", dev->si_name, td->td_tid);
@@ -148,7 +148,7 @@ busy:
 #if USE_FUSE_LOCK
 	fuse_useco--;
 #else
-	mtx_unlock(&Giant);
+	fuse_lck_mtx_unlock(Giant);
 #endif
 #endif
 	return (EBUSY);
@@ -160,7 +160,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 	struct fuse_data *data;
 
 #if DO_GIANT_MANUALLY && ! USE_FUSE_LOCK
-	mtx_lock(&Giant);
+	fuse_lck_mtx_lock(Giant);
 #endif
 	FUSE_LOCK();
 	data = fuse_get_devdata(dev);
@@ -170,7 +170,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 	        ("fuse device is already closed upon close"));
 	fdata_set_dead(data);
         data->dataflags &= ~FSESS_OPENED;
-	mtx_lock(&data->aw_mtx);
+	fuse_lck_mtx_lock(data->aw_mtx);
 
 	/* wakup poll()ers */
 	selwakeuppri(&data->ks_rsel, PZERO + 1);
@@ -181,13 +181,13 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 
 		/* Don't let syscall handlers wait in vain */
 		while ((tick = fuse_aw_pop(data))) {
-			mtx_lock(&tick->tk_aw_mtx);
+			fuse_lck_mtx_lock(tick->tk_aw_mtx);
 			fticket_set_answered(tick);
 			tick->tk_aw_errno = ENOTCONN;
 			wakeup(tick);
-			mtx_unlock(&tick->tk_aw_mtx);
+			fuse_lck_mtx_unlock(tick->tk_aw_mtx);
 		}
-		mtx_unlock(&data->aw_mtx);
+		fuse_lck_mtx_unlock(data->aw_mtx);
 
 		FUSE_UNLOCK();
 		goto out;
@@ -199,7 +199,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 
 out:
 #if DO_GIANT_MANUALLY && ! USE_FUSE_LOCK
-	mtx_unlock(&Giant);
+	fuse_lck_mtx_unlock(Giant);
 #endif
 	fuse_useco--;
 	
@@ -216,12 +216,12 @@ fuse_device_poll(struct cdev *dev, int events, struct thread *td)
 	data = fuse_get_devdata(dev);
 
 	if (events & (POLLIN | POLLRDNORM)) {
-		mtx_lock(&data->ms_mtx);
+		fuse_lck_mtx_lock(data->ms_mtx);
 		if (fdata_get_dead(data) || STAILQ_FIRST(&data->ms_head))
 			revents |= events & (POLLIN | POLLRDNORM);
 		else
 			selrecord(td, &data->ks_rsel);
-		mtx_unlock(&data->ms_mtx);
+		fuse_lck_mtx_unlock(data->ms_mtx);
 	}
 
 	if (events & (POLLOUT | POLLWRNORM)) {
@@ -250,11 +250,11 @@ fuse_device_read(struct cdev *dev, struct uio *uio, int ioflag)
 
 	DEBUG("fuse device being read on thread %d\n", uio->uio_td->td_tid);
 
-	mtx_lock(&data->ms_mtx);
+	fuse_lck_mtx_lock(data->ms_mtx);
 again:
 	if (fdata_get_dead(data)) {
 		DEBUG2G("we know early on that reader should be kicked so we don't wait for news\n");
-		mtx_unlock(&data->ms_mtx);
+		fuse_lck_mtx_unlock(data->ms_mtx);
 		return (ENODEV);
 	}
 
@@ -262,13 +262,13 @@ again:
 		/* check if we may block */
 		if (ioflag & O_NONBLOCK) {
 			/* get outa here soon */
-			mtx_unlock(&data->ms_mtx);
+			fuse_lck_mtx_unlock(data->ms_mtx);
 			return (EAGAIN);
 		}
 		else {
 			err = msleep(data, &data->ms_mtx, PCATCH, "fu_msg", 0);
 			if (err != 0) {
-				mtx_unlock(&data->ms_mtx);
+				fuse_lck_mtx_unlock(data->ms_mtx);
 				return (fdata_get_dead(data) ? ENODEV : err);
 			}
 			tick = fuse_ms_pop(data);
@@ -284,7 +284,7 @@ again:
 		DEBUG("no message on thread #%d\n", uio->uio_td->td_tid);
 		goto again;
 	}
-	mtx_unlock(&data->ms_mtx);
+	fuse_lck_mtx_unlock(data->ms_mtx);
 
 	if (fdata_get_dead(data)) {
 		/*
@@ -418,7 +418,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 	/* Pass stuff over to callback if there is one installed */
 
 	/* Looking for ticket with the unique id of header */
-	mtx_lock(&data->aw_mtx);
+	fuse_lck_mtx_lock(data->aw_mtx);
 	TAILQ_FOREACH_SAFE(tick, &data->aw_head, tk_aw_link,
 	                   x_tick) {
 		DEBUG("bumped into callback #%llu\n",
@@ -429,7 +429,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 			break;
 		}
 	}
-	mtx_unlock(&data->aw_mtx);
+	fuse_lck_mtx_unlock(data->aw_mtx);
 
 	if (found) {
 		if (tick->tk_aw_handler) {

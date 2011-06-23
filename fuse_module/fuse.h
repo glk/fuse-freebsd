@@ -105,8 +105,8 @@ SYSCTL_DECL(_vfs_fuse);
 
 #if USE_FUSE_LOCK
 extern struct mtx fuse_mtx;
-#define FUSE_LOCK() mtx_lock(&fuse_mtx)
-#define FUSE_UNLOCK() mtx_unlock(&fuse_mtx)
+#define FUSE_LOCK() fuse_lck_mtx_lock(fuse_mtx)
+#define FUSE_UNLOCK() fuse_lck_mtx_unlock(fuse_mtx)
 #else
 #define FUSE_LOCK()
 #define FUSE_UNLOCK()
@@ -142,6 +142,10 @@ do {						\
 #define FUSE_DEBUG_IPC                  0
 #endif
 
+#ifndef FUSE_DEBUG_LOCK
+#define FUSE_DEBUG_LOCK                 0
+#endif
+
 #ifndef FUSE_DEBUG_VFSOPS
 #define FUSE_DEBUG_VFSOPS               0
 #endif
@@ -158,3 +162,19 @@ do {						\
     if (((cond))) {                                     \
         printf("%s: " fmt, __func__, ## __VA_ARGS__);   \
     } } while (0)
+
+#define fuse_lck_mtx_lock(mtx) do {                                     \
+    DEBUGX(FUSE_DEBUG_LOCK, "0:   lock(%s): %s@%d by %d\n",             \
+        __STRING(mtx), __func__, __LINE__, curthread->td_proc->p_pid);  \
+    mtx_lock(&(mtx));                                                   \
+    DEBUGX(FUSE_DEBUG_LOCK, "1:   lock(%s): %s@%d by %d\n",             \
+        __STRING(mtx), __func__, __LINE__, curthread->td_proc->p_pid);  \
+    } while (0)
+
+#define fuse_lck_mtx_unlock(mtx) do {                                   \
+    DEBUGX(FUSE_DEBUG_LOCK, "0: unlock(%s): %s@%d by %d\n",             \
+        __STRING(mtx), __func__, __LINE__, curthread->td_proc->p_pid);  \
+    mtx_unlock(&(mtx));                                                 \
+    DEBUGX(FUSE_DEBUG_LOCK, "1: unlock(%s): %s@%d by %d\n",             \
+        __STRING(mtx), __func__, __LINE__, curthread->td_proc->p_pid);  \
+    } while (0)
