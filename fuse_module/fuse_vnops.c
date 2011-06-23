@@ -47,6 +47,7 @@
 #include "fuse_internal.h"
 #include "fuse_ipc.h"
 #include "fuse_node.h"
+#include "fuse_param.h"
 #include "fuse_io.h"
 
 #include <sys/priv.h>
@@ -186,7 +187,11 @@ fuse_vnop_close(struct vop_close_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
+        return 0;
+    }
+
+    if (fflag & IO_NDELAY) {
         return 0;
     }
 
@@ -242,7 +247,7 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(dvp)) {
+    if (fuse_isdeadfs_fs(dvp)) {
         panic("FUSE: fuse_vnop_create(): called on a dead file system");
     }
 
@@ -386,7 +391,7 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
         return 0;
     }
 
@@ -557,6 +562,8 @@ fuse_vnop_link(struct vop_link_args *ap)
     struct vnode         *tdvp    = ap->a_tdvp;
     struct componentname *cnp     = ap->a_cnp;
 
+    struct vattr      *vap = VTOVA(vp);
+
     struct fuse_dispatcher fdi;
     struct fuse_entry_out *feo;
     struct fuse_link_in    fli;
@@ -565,12 +572,16 @@ fuse_vnop_link(struct vop_link_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
-        panic("fuse_vnop_link(): called on a dead file system");
+    if (fuse_isdeadfs_fs(vp)) {
+        panic("FUSE: fuse_vnop_link(): called on a dead file system");
     }
 
     if (vnode_mount(tdvp) != vnode_mount(vp)) {
         return EXDEV;
+    }
+
+    if (vap->va_nlink >= FUSE_LINK_MAX) {
+        return EMLINK;
     }
 
     fli.oldnodeid = VTOI(vp);
@@ -1039,7 +1050,7 @@ fuse_vnop_mkdir(struct vop_mkdir_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(dvp)) {
+    if (fuse_isdeadfs_fs(dvp)) {
         panic("FUSE: fuse_vnop_mkdir(): called on a dead file system");
     }
 
@@ -1077,7 +1088,7 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(dvp)) {
+    if (fuse_isdeadfs_fs(dvp)) {
         panic("fuse_vnop_mknod(): called on a dead file system");
     }
 
@@ -1193,7 +1204,7 @@ fuse_vnop_read(struct vop_read_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
         return EIO;
     }
 
@@ -1226,7 +1237,7 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
         return EBADF;
     }
 
@@ -1283,7 +1294,7 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
         return EBADF;
     }
 
@@ -1376,7 +1387,7 @@ fuse_vnop_remove(struct vop_remove_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs_fs(vp)) {
         panic("FUSE: fuse_vnop_remove(): called on a dead file system");
     }
 
@@ -1420,8 +1431,8 @@ fuse_vnop_rename(struct vop_rename_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(fdvp)) {
-        panic("fuse_vnop_rename(): called on a dead file system");
+    if (fuse_isdeadfs_fs(fdvp)) {
+        panic("FUSE: fuse_vnop_rename(): called on a dead file system");
     }
 
     if (fvp->v_mount != tdvp->v_mount ||
@@ -1491,8 +1502,8 @@ fuse_vnop_rmdir(struct vop_rmdir_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(ap->a_vp)) {
-        panic("fuse_vnop_rmdir(): called on a dead file system");
+    if (fuse_isdeadfs_fs(vp)) {
+        panic("FUSE: fuse_vnop_rmdir(): called on a dead file system");
     }
 
     if (VTOFUD(vp) == VTOFUD(dvp)) {
@@ -1555,7 +1566,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
      * ...
      */
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
         return EBADF;
     }
 
@@ -1740,6 +1751,10 @@ fuse_vnop_symlink(struct vop_symlink_args *ap)
     int err;
     size_t len;
 
+    if (fuse_isdeadfs_fs(dvp)) {
+        panic("FUSE: fuse_vnop_symlink(): called on a dead file system");
+    }
+
     /*
      * Unlike the other creator type calls, here we have to create a message
      * where the name of the new entry comes first, and the data describing
@@ -1783,7 +1798,7 @@ fuse_vnop_write(struct vop_write_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_nop(vp)) {
+    if (fuse_isdeadfs(vp)) {
         return EIO;
     }
 

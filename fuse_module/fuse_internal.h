@@ -109,9 +109,8 @@ uio_setresid(struct uio *uio, ssize_t resid)
 
 static __inline__
 int
-fuse_isdeadfs(struct vnode *vp)
+fuse_isdeadfs_mp(struct mount *mp)
 {
-    struct mount *mp = vnode_mount(vp);
     struct fuse_data *data = fuse_get_mpdata(mp);
 
     return (data->dataflags & FSESS_DEAD);
@@ -119,11 +118,16 @@ fuse_isdeadfs(struct vnode *vp)
 
 static __inline__
 int
-fuse_isdeadfs_mp(struct mount *mp)
+fuse_isdeadfs(struct vnode *vp)
 {
-    struct fuse_data *data = fuse_get_mpdata(mp);
+    return fuse_isdeadfs_mp(vnode_mount(vp));
+}
 
-    return (data->dataflags & FSESS_DEAD);
+static __inline__
+int
+fuse_isdeadfs_fs(struct vnode *vp)
+{
+    return fuse_isdeadfs_mp(vnode_mount(vp));
 }
 
 /* access */

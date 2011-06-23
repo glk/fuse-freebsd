@@ -129,6 +129,10 @@ fuse_filehandle_close(struct vnode *vp,
         /* NOTREACHED */
     }
 
+    if (fuse_isdeadfs(vp)) {
+        goto out;
+    }
+
     if (vnode_isdir(vp)) {
         op = FUSE_RELEASEDIR;
         isdir = 1;
