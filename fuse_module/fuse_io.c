@@ -52,52 +52,6 @@ static int fuse_write_biobackend(struct fuse_io_data *fioda);
 
 static fuse_buffeater_t fuse_std_buffeater; 
 
-static int
-fuse_io_filehandle_get(struct vnode *vp, int rdonly,
-    struct ucred *cred, struct fuse_filehandle **fufhp)
-{
-    struct fuse_vnode_data *fvdat = VTOFUD(vp);
-    struct fuse_filehandle *fufh;
-    fufh_type_t fufh_type;
-    int err = 0;
-
-    if (rdonly) {
-        fufh_type = FUFH_RDONLY; // FUFH_RDWR will also do
-    } else {
-        fufh_type = FUFH_WRONLY; // FUFH_RDWR will also do
-    }
-
-    fufh = &(fvdat->fufh[fufh_type]);
-    if (!(fufh->fufh_flags & FUFH_VALID)) {
-        fufh_type = FUFH_RDWR;
-        fufh = &(fvdat->fufh[fufh_type]);
-        if (!(fufh->fufh_flags & FUFH_VALID)) {
-            fufh = NULL;
-        } else {
-            debug_printf("strategy falling back to FUFH_RDWR ... OK\n");
-        }
-    }
-
-    if (fufh == NULL) {
-        if (rdonly) {
-            fufh_type = FUFH_RDONLY;
-        } else {
-            fufh_type = FUFH_RDWR;
-        }
-        err = fuse_filehandle_get(vp, NULL, cred, fufh_type);
-        if (!err) {
-            fufh = &(fvdat->fufh[fufh_type]);
-            debug_printf("STRATEGY: created *new* fufh of type %d\n",
-                fufh_type);
-        }
-    } else {
-        debug_printf("STRATEGY: using existing fufh of type %d\n", fufh_type);
-    }
-
-    *fufhp = fufh;
-    return (err);
-}
-
 /****************
  *
  * >>> Low level I/O routines and interface to them
@@ -113,10 +67,12 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
     struct fuse_io_data fioda;
     int err, directio;
 
-    err = fuse_io_filehandle_get(vp, (uio->uio_rw == UIO_READ),
-        cred, &fufh);
-    if (err)
-        return (err);
+    err = fuse_filehandle_getrw(vp,
+        (uio->uio_rw == UIO_READ) ? FUFH_RDONLY : FUFH_WRONLY, &fufh);
+    if (err) {
+        DEBUG("fetching filehandle failed\n");
+        return err;
+    }
 
     bzero(&fioda, sizeof(fioda));
     fioda.vp = vp;
@@ -780,13 +736,12 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
 
     cred = bp->b_iocmd == BIO_READ ? bp->b_rcred : bp->b_wcred;
 
-    err = fuse_io_filehandle_get(vp, (bp->b_iocmd == BIO_READ),
-        cred, &fufh);
+    err = fuse_filehandle_getrw(vp,
+	(bp->b_iocmd == BIO_READ) ? FUFH_RDONLY : FUFH_WRONLY, &fufh);
     if (err) {
-        DEBUG2G("fetching filehandle failed\n");
+        DEBUG("fetching filehandle failed\n");
         goto out;
     }
-    fufh->fufh_flags |= FUFH_STRATEGY;
 
     DEBUG2G("vp #%ju, fufh #%ju\n",
 	(uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);

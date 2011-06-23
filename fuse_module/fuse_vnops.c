@@ -184,9 +184,6 @@ fuse_vnop_close(struct vop_close_args *ap)
     int isdir = (vnode_isdir(vp)) ? 1 : 0;
     fufh_type_t fufh_type;
 
-    struct fuse_vnode_data *fvdat = VTOFUD(vp);
-    struct fuse_filehandle *fufh = NULL;
-
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs_nop(vp)) {
@@ -199,16 +196,14 @@ fuse_vnop_close(struct vop_close_args *ap)
         fufh_type = fuse_filehandle_xlate_from_fflags(fflag);
     }
 
-    fufh = &(fvdat->fufh[fufh_type]);
-
-    if (!(fufh->fufh_flags & FUFH_VALID)) {
-        panic("fufh type %d found to be invalid in close\n", fufh_type);
-    }
-
-    fufh->open_count--;
-
-    if ((fufh->open_count == 0) && !(fufh->fufh_flags & FUFH_MAPPED)) {
-        (void)fuse_filehandle_put(vp, NULL, NULL, fufh_type, 0);
+    if (!fuse_filehandle_valid(vp, fufh_type)) {
+        int i;
+        for (i = 0; i < FUFH_MAXTYPE; i++)
+            if (fuse_filehandle_valid(vp, i))
+                break;
+        if (i == FUFH_MAXTYPE)
+            panic("FUSE: fufh type %d found to be invalid in close (fflag=0x%x)\n",
+                fufh_type, fflag);
     }
 
     return 0;
@@ -334,29 +329,16 @@ bringup:
        return err;
     }
 
+    ASSERT_VOP_ELOCKED(*vpp, "fuse_vnop_create");
+
     fdip->answ = gone_good_old ? NULL : feo + 1;
 
     if (!gone_good_old) {
-
         uint64_t x_fh_id = ((struct fuse_open_out *)(feo + 1))->fh;
         uint32_t x_open_flags = ((struct fuse_open_out *)(feo + 1))->open_flags;
-        struct fuse_vnode_data *fvdat = VTOFUD(*vpp);
-        struct fuse_filehandle *fufh = &(fvdat->fufh[FUFH_RDWR]);
 
-        fufh->fh_id = x_fh_id;
-        fufh->open_flags = x_open_flags;
-
-#if 0
-        struct fuse_dispatcher x_fdi;
-        struct fuse_release_in *x_fri;
-        fdisp_init(&x_fdi, sizeof(*x_fri));
-        fdisp_make_vp(&x_fdi, FUSE_RELEASE, *vpp, context);
-        x_fri = x_fdi.indata;
-        x_fri->fh = x_fh_id;
-        x_fri->flags = O_WRONLY;
-        fuse_insert_callback(x_fdi.tick, NULL);
-        fuse_insert_message(x_fdi.tick);
-#endif
+	fuse_filehandle_init(*vpp, FUFH_RDWR, NULL, x_fh_id);
+	fuse_vnode_open(*vpp, x_open_flags, td);
     }
 
     return 0;
@@ -415,7 +397,7 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
     fdisp_init(&fdi, 0);
     for (type = 0; type < FUFH_MAXTYPE; type++) {
         fufh = &(fvdat->fufh[type]);
-        if (fufh->fufh_flags & FUFH_VALID) {
+        if (FUFH_IS_VALID(fufh)) {
             fuse_internal_fsync(vp, td, NULL, fufh, &fdi);
         }
     }
@@ -549,10 +531,8 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
 
     for (type = 0; type < FUFH_MAXTYPE; type++) {
         fufh = &(fvdat->fufh[type]);
-        if (fufh->fufh_flags & FUFH_VALID) {
-            fufh->fufh_flags &= ~FUFH_MAPPED;
-            fufh->open_count = 0;
-            (void)fuse_filehandle_put(vp, td, NULL, type, 0);
+        if (FUFH_IS_VALID(fufh)) {
+            fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_BACKGROUNDED);
         }
     }
 
@@ -1122,10 +1102,8 @@ fuse_vnop_open(struct vop_open_args *ap)
 
     fufh_type_t             fufh_type;
     struct fuse_vnode_data *fvdat;
-    struct fuse_filehandle *fufh = NULL;
-    struct fuse_filehandle *fufh_rw = NULL;
 
-    int error, isdir = 0, oflags;
+    int error, isdir = 0;
 
     fuse_trace_printf_vnop();
 
@@ -1145,103 +1123,44 @@ fuse_vnop_open(struct vop_open_args *ap)
         fufh_type = fuse_filehandle_xlate_from_fflags(mode);
     }
 
-    oflags = fuse_filehandle_xlate_to_oflags(fufh_type);
-
-    fufh = &(fvdat->fufh[fufh_type]);
-
     if (!isdir && (fvdat->flag & FN_CREATING)) {
 
-        fuse_lck_mtx_lock(fvdat->createlock);
+        sx_xlock(&fvdat->create_lock);
 
         if (fvdat->flag & FN_CREATING) { // check again
-            if (fvdat->creator == curthread->td_tid) {
-
-                /*
-                 * For testing the race condition we want to prevent here,
-                 * try something like the following:
-                 *
-                 *     int dummyctr = 0;
-                 *
-                 *     for (; dummyctr < 2048000000; dummyctr++);
-                 */
-
-                fufh_rw = &(fvdat->fufh[FUFH_RDWR]);
-
-                fufh->fufh_flags |= FUFH_VALID;
-                fufh->fufh_flags &= ~FUFH_MAPPED;
-                fufh->open_count = 1;
-                fufh->open_flags = oflags;
-                fufh->type = fufh_type;
-
-                fufh->fh_id = fufh_rw->fh_id;
-                fufh->open_flags = fufh_rw->open_flags;
-                debug_printf("creator picked up stashed handle, moved to %d\n",
-                             fufh_type);
-                
+            if (fvdat->create_owner == curthread->td_tid) {
+                fufh_type = FUFH_RDWR;
+                MPASS(fuse_filehandle_valid(vp, fufh_type));
                 fvdat->flag &= ~FN_CREATING;
-
-                fuse_lck_mtx_unlock(fvdat->createlock);
-                wakeup((caddr_t)&fvdat->creator); // wake up all
-                goto ok; /* return 0 */
+                sx_xunlock(&fvdat->create_lock);
+                cv_broadcast(&fvdat->create_cv); // wake up all
+                return 0;
             } else {
                 debug_printf("contender going to sleep\n");
-                error = msleep(&fvdat->creator, &fvdat->createlock,
-                               PDROP | PINOD | PCATCH, "fuse_open", 0);
-                /*
-                 * msleep will drop the mutex. since we have PDROP specified,
-                 * it will NOT regrab the mutex when it returns.
-                 */
+                error = cv_wait_sig(&fvdat->create_cv, &fvdat->create_lock);
                 debug_printf("contender awake (error = %d)\n", error);
-
                 if (error) {
                     /*
-                     * Since we specified PCATCH above, we'll be woken up in
-                     * case a signal arrives. The value of error could be
-                     * EINTR or ERESTART.
+                     * We'll be woken up in case a signal arrives.
+                     * The value of error could be EINTR or ERESTART.
                      */
                     return error;
                 }
             }
         } else {
-            fuse_lck_mtx_unlock(fvdat->createlock);
+            sx_xunlock(&fvdat->create_lock);
             /* Can proceed from here. */
         }
     }
 
-    if (fufh->fufh_flags & FUFH_VALID) {
-        fufh->open_count++;
-        goto ok; /* return 0 */
+    if (fuse_filehandle_valid(vp, fufh_type)) {
+        fuse_vnode_open(vp, 0, td);
+        return 0;
     }
 
-    error = fuse_filehandle_get(vp, td, cred, fufh_type);
-    if (error) {
-        return error;
-    }
+    error = fuse_filehandle_open(vp, fufh_type, NULL, td, cred);
 
-ok:
-    if (vnode_vtype(vp) == VREG) {
-        /* XXXIP prevent getattr, by using cached node size */
-        vnode_create_vobject(vp, 0, td);
-    }
-
-    /*
-     * Doing this here because when a vnode goes inactive, things like
-     * no-cache and no-readahead are cleared by the kernel.
-     */
-
-    {
-#ifdef XXXIP
-        int dataflags = fuse_get_mpdata(vnode_mount(vp))->dataflags;
-        if (dataflags & FSESS_NO_READAHEAD) {
-            vnode_setnoreadahead(vp);
-        }
-        if (dataflags & FSESS_NO_UBC) {
-            vnode_setnocache(vp);
-        }
-#endif
-    }
-
-    return 0;
+    return error;
 }
 
 /*
@@ -1306,14 +1225,15 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
 
     fvdat = VTOFUD(vp);
 
-    fufh = &(fvdat->fufh[FUFH_RDONLY]);
-
-    if (!(fufh->fufh_flags & FUFH_VALID)) {
-        err = fuse_filehandle_get(vp, NULL, cred, FUFH_RDONLY);
-        if (err) {
-            return err;
-        }
-        freefufh = 1;
+    if (!fuse_filehandle_valid(vp, FUFH_RDONLY)) {
+	    DEBUG("calling readdir() before open()");
+	    err = fuse_filehandle_open(vp, FUFH_RDONLY, &fufh, NULL, cred);
+	    freefufh = 1;
+    } else {
+	    err = fuse_filehandle_get(vp, FUFH_RDONLY, &fufh);
+    }
+    if (err) {
+	    return (err);
     }
 
 #define DIRCOOKEDSIZE FUSE_DIRENT_ALIGN(FUSE_NAME_OFFSET + MAXNAMLEN + 1)
@@ -1323,8 +1243,8 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
 
     fiov_teardown(&cookediov);
     if (freefufh) {
-        fufh->open_count--;
-        (void)fuse_filehandle_put(vp, NULL, NULL, FUFH_RDONLY, 0);
+        fuse_filehandle_close(vp, FUFH_RDONLY, NULL, cred,
+            FUSE_OP_FOREGROUNDED);
     }
 
     fuse_invalidate_attr(vp);
@@ -1404,15 +1324,10 @@ fuse_vnop_reclaim(struct vop_reclaim_args *ap)
 
     for (type = 0; type < FUFH_MAXTYPE; type++) {
         fufh = &(fvdat->fufh[type]);
-        if (fufh->fufh_flags & FUFH_VALID) {
-            if (fufh->fufh_flags & FUFH_STRATEGY) {
-                fufh->fufh_flags &= ~FUFH_MAPPED;
-                fufh->open_count = 0;
-                (void)fuse_filehandle_put(vp, td, NULL, type, 0);
-            } else {
-                panic("vnode being reclaimed but fufh (type=%d) is valid",
-                      type);
-            }
+        if (FUFH_IS_VALID(fufh)) {
+            printf("FUSE: vnode being reclaimed but fufh (type=%d) is valid",
+                type);
+            fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_BACKGROUNDED);
         }
     }
 
@@ -1636,8 +1551,6 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
     if (vap->va_size != VNOVAL) {
 
         struct fuse_filehandle *fufh = NULL;
-        fufh_type_t fufh_type = FUFH_WRONLY;
-        struct fuse_vnode_data *fvdat = VTOFUD(vp);
 
         // Truncate to a new value.
         fsai->FUSEATTR(size) = vap->va_size;
@@ -1645,15 +1558,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
         newsize = vap->va_size;
         fsai->valid |= FATTR_SIZE;      
 
-        fufh = &(fvdat->fufh[fufh_type]);
-        if (!(fufh->fufh_flags & FUFH_VALID)) {
-            fufh_type = FUFH_RDWR;
-            fufh = &(fvdat->fufh[fufh_type]);
-            if (!(fufh->fufh_flags & FUFH_VALID)) {
-                fufh = NULL;
-            }
-        }
-
+        fuse_filehandle_getrw(vp, FUFH_WRONLY, &fufh);
         if (fufh) {
             fsai->fh = fufh->fh_id;
             fsai->valid |= FATTR_FH;

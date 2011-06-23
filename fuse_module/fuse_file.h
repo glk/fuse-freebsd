@@ -20,19 +20,12 @@ typedef enum fufh_type {
     FUFH_MAXTYPE = 3,
 } fufh_type_t;
 
-#define FUFH_VALID    0x00000001
-#define FUFH_MAPPED   0x00000002
-#define FUFH_STRATEGY 0x00000004
-
 struct fuse_filehandle {
     uint64_t fh_id;
-    int      open_count;
-    int      open_flags;
-    int      fuse_open_flags;
-    fufh_type_t type;
-    int      fufh_flags;
+    fufh_type_t fh_type;
 };
-typedef struct fuse_filehandle * fuse_filehandle_t;
+
+#define FUFH_IS_VALID(f)  ((f)->fh_type != FUFH_INVALID)
 
 static __inline__
 fufh_type_t
@@ -91,9 +84,19 @@ fuse_filehandle_xlate_to_oflags(fufh_type_t type)
     return oflags;
 }
 
-int fuse_filehandle_get(struct vnode *vp, struct thread *td, struct ucred *cred,
-                        fufh_type_t fufh_type);
-int fuse_filehandle_put(struct vnode *vp, struct thread *td, struct ucred *cred,
-                        fufh_type_t fufh_type, int foregrounded);
+int fuse_filehandle_valid(struct vnode *vp, fufh_type_t fufh_type);
+int fuse_filehandle_get(struct vnode *vp, fufh_type_t fufh_type,
+                        struct fuse_filehandle **fufhp);
+int fuse_filehandle_getrw(struct vnode *vp, fufh_type_t fufh_type,
+                          struct fuse_filehandle **fufhp);
+
+void fuse_filehandle_init(struct vnode *vp, fufh_type_t fufh_type,
+		          struct fuse_filehandle **fufhp, uint64_t fh_id);
+int fuse_filehandle_open(struct vnode *vp, fufh_type_t fufh_type,
+                         struct fuse_filehandle **fufhp, struct thread *td,
+                         struct ucred *cred);
+int fuse_filehandle_close(struct vnode *vp, fufh_type_t fufh_type,
+                          struct thread *td, struct ucred *cred,
+                          fuse_op_waitfor_t waitfor);
 
 #endif /* _FUSE_FILE_H_ */

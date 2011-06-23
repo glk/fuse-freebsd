@@ -178,3 +178,8 @@ do {						\
     DEBUGX(FUSE_DEBUG_LOCK, "1: unlock(%s): %s@%d by %d\n",             \
         __STRING(mtx), __func__, __LINE__, curthread->td_proc->p_pid);  \
     } while (0)
+
+typedef enum fuse_op_waitfor {
+    FUSE_OP_BACKGROUNDED = 0,
+    FUSE_OP_FOREGROUNDED = 1,
+} fuse_op_waitfor_t;

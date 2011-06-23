@@ -40,8 +40,9 @@ struct fuse_vnode_data {
 
     /** locking **/
 
-    struct mtx createlock;
-    lwpid_t    creator;
+    struct sx  create_lock;
+    struct cv  create_cv;
+    lwpid_t    create_owner;
 
     /*
      * The nodelock must be held when data in the FUSE node is accessed or
@@ -115,5 +116,9 @@ fuse_vnode_get(struct mount         *mp,
                struct componentname *cnp,
                enum vtype            vtyp,
                uint64_t              size);
+
+void fuse_vnode_open(struct vnode *vp,
+                     int32_t fuse_open_flags,
+                     struct thread *td);
 
 #endif /* _FUSE_NODE_H_ */

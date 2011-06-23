@@ -43,16 +43,22 @@ static void
 fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     uint64_t nodeid, enum vtype vtyp)
 {
+    int i;
+
     fvdat->nid = nodeid;
     if (nodeid == FUSE_ROOT_ID) {
         vp->v_vflag |= VV_ROOT;
     }
     vp->v_type = vtyp;
     vp->v_data = fvdat;
-    fvdat->creator = curthread->td_tid;
-    mtx_init(&fvdat->createlock, "fuse node create mutex", NULL, MTX_DEF);
+    fvdat->create_owner = curthread->td_tid;
+    cv_init(&fvdat->create_cv, "fuse node create cv");
+    sx_init(&fvdat->create_lock, "fuse node create lock");
     sx_init(&fvdat->nodelock, "fuse node sx lock");
     sx_init(&fvdat->truncatelock, "fuse node truncate sx lock");
+
+    for (i = 0; i < FUFH_MAXTYPE; i++)
+        fvdat->fufh[i].fh_type = FUFH_INVALID;
 }
 
 void
@@ -61,7 +67,8 @@ fuse_vnode_destroy(struct vnode *vp)
     struct fuse_vnode_data *fvdat = vp->v_data;
 
     vp->v_data = NULL;
-    mtx_destroy(&fvdat->createlock);
+    cv_destroy(&fvdat->create_cv);
+    sx_destroy(&fvdat->create_lock);
     sx_destroy(&fvdat->nodelock);
     sx_destroy(&fvdat->truncatelock);
     free(fvdat, M_FUSEVN);
@@ -175,4 +182,20 @@ fuse_vnode_get(struct mount         *mp,
     VTOFUD(*vpp)->nlookup++;
 
     return 0;
+}
+
+void
+fuse_vnode_open(struct vnode *vp, int32_t fuse_open_flags, struct thread *td)
+{
+    /*
+     * Funcation is called for every vnode open.
+     * Merge fuse_open_flags it may be 0
+     *
+     * XXXIP: Handle FOPEN_DIRECT_IO and FOPEN_KEEP_CACHE
+     */
+
+    if (vnode_vtype(vp) == VREG) {
+        /* XXXIP prevent getattr, by using cached node size */
+        vnode_create_vobject(vp, 0, td);
+    }
 }
