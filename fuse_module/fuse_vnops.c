@@ -122,6 +122,10 @@ static u_long fuse_lookup_cache_misses  = 0;
 SYSCTL_ULONG(_vfs_fuse, OID_AUTO, lookup_cache_misses, CTLFLAG_RD,
              &fuse_lookup_cache_misses, 0, "");
 
+int fuse_lookup_cache_enable = 1;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, lookup_cache_enable, CTLFLAG_RW,
+           &fuse_lookup_cache_enable, 0, "");
+
 int fuse_pbuf_freecnt = -1;
 
 /*
@@ -695,7 +699,7 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
         fdisp_init(&fdi, 0);
         op = FUSE_GETATTR;
         goto calldaemon;
-    } else {
+    } else if (fuse_lookup_cache_enable) {
         err = cache_lookup(dvp, vpp, cnp);
         switch (err) {
 

@@ -187,7 +187,9 @@ fuse_vnode_get(struct mount         *mp,
 	    MPASS(!(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'));
 	    VTOFUD(*vpp)->parent_nid = VTOI(dvp);
     }
-    if (cnp != NULL && (cnp->cn_flags & MAKEENTRY) != 0) {
+    if (dvp != NULL && cnp != NULL && (cnp->cn_flags & MAKEENTRY) != 0) {
+        ASSERT_VOP_LOCKED(*vpp, "fuse_vnode_get");
+        ASSERT_VOP_LOCKED(dvp, "fuse_vnode_get");
         cache_enter(dvp, *vpp, cnp);
     }
     VTOFUD(*vpp)->nlookup++;
