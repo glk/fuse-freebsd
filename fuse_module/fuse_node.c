@@ -39,6 +39,10 @@
 
 MALLOC_DEFINE(M_FUSEVN, "fuse_vnode", "fuse vnode private data");
 
+static int fuse_node_count = 0;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, node_count, CTLFLAG_RD,
+            &fuse_node_count, 0, "");
+
 static void
 fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     uint64_t nodeid, enum vtype vtyp)
@@ -59,6 +63,8 @@ fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
 
     for (i = 0; i < FUFH_MAXTYPE; i++)
         fvdat->fufh[i].fh_type = FUFH_INVALID;
+
+    atomic_add_acq_int(&fuse_node_count, 1);
 }
 
 void
@@ -72,6 +78,8 @@ fuse_vnode_destroy(struct vnode *vp)
     sx_destroy(&fvdat->nodelock);
     sx_destroy(&fvdat->truncatelock);
     free(fvdat, M_FUSEVN);
+
+    atomic_add_acq_int(&fuse_node_count, -1);
 }
 
 static int

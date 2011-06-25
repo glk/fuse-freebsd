@@ -114,13 +114,13 @@ struct vop_vector fuse_vnops = {
 	.vop_unlock        = fuse_vnop_unlock,
 };
 
-static uint64_t fuse_lookup_cache_hits = 0;
-SYSCTL_QUAD(_vfs_fuse, OID_AUTO, lookup_cache_hits, CTLFLAG_RD,
-            &fuse_lookup_cache_hits, 0, "");
+static u_long fuse_lookup_cache_hits = 0;
+SYSCTL_ULONG(_vfs_fuse, OID_AUTO, lookup_cache_hits, CTLFLAG_RD,
+             &fuse_lookup_cache_hits, 0, "");
 
-static uint64_t fuse_lookup_cache_misses  = 0;
-SYSCTL_QUAD(_vfs_fuse, OID_AUTO, lookup_cache_misses, CTLFLAG_RD,
-            &fuse_lookup_cache_misses, 0, "");
+static u_long fuse_lookup_cache_misses  = 0;
+SYSCTL_ULONG(_vfs_fuse, OID_AUTO, lookup_cache_misses, CTLFLAG_RD,
+             &fuse_lookup_cache_misses, 0, "");
 
 int fuse_pbuf_freecnt = -1;
 
@@ -700,11 +700,11 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
         switch (err) {
 
         case -1: /* positive match */
-            fuse_lookup_cache_hits++;
+            atomic_add_acq_long(&fuse_lookup_cache_hits, 1);
             return 0;
 
         case 0: /* no match in cache */
-            fuse_lookup_cache_misses++;
+            atomic_add_acq_long(&fuse_lookup_cache_misses, 1);
             break;
 
         case ENOENT: /* negative match */

@@ -32,9 +32,9 @@
 #define FUSE_DEBUG_MODULE FILE
 #include "fuse_debug.h"
 
-static uint64_t fuse_fh_upcall_count = 0;
-SYSCTL_QUAD(_vfs_fuse, OID_AUTO, fh_upcall_count, CTLFLAG_RD,
-            &fuse_fh_upcall_count, 0, "");
+static int fuse_fh_count = 0;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, filehandle_count, CTLFLAG_RD,
+            &fuse_fh_count, 0, "");
 
 int
 fuse_filehandle_open(struct vnode *vp,
@@ -81,7 +81,6 @@ fuse_filehandle_open(struct vnode *vp,
     foi = fdi.indata;
     foi->flags = oflags;
 
-    fuse_fh_upcall_count++;
     if ((err = fdisp_wait_answ(&fdi))) {
         debug_printf("OUCH ... daemon didn't give fh (err = %d)\n", err);
         if (err == ENOENT) {
@@ -156,6 +155,7 @@ fuse_filehandle_close(struct vnode *vp,
     }
 
 out:
+    atomic_add_acq_int(&fuse_fh_count, -1);
     fufh->fh_id = (uint64_t)-1;
     fufh->fh_type = FUFH_INVALID;
     fuse_invalidate_attr(vp);
@@ -224,4 +224,6 @@ fuse_filehandle_init(struct vnode *vp,
 
     if (fufhp != NULL)
         *fufhp = fufh;
+
+    atomic_add_acq_int(&fuse_fh_count, 1);
 }
