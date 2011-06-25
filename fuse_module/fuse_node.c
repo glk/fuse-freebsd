@@ -99,9 +99,9 @@ fuse_vnode_alloc(struct mount *mp,
             struct thread *td,
             uint64_t nodeid,
             enum vtype vtyp,
-	    int lkflags,
             struct vnode **vpp)
 {
+    const int lkflags = LK_EXCLUSIVE | LK_RETRY;
     struct fuse_vnode_data *fvdat;
     struct vnode *vp2;
     int err = 0;
@@ -124,8 +124,6 @@ fuse_vnode_alloc(struct mount *mp,
         return (0);
     }
 
-    lkflags = LK_EXCLUSIVE | LK_RETRY; /* XXXIP don't loose other flags */
-
     fvdat = malloc(sizeof(*fvdat), M_FUSEVN, M_WAITOK | M_ZERO);
     err = getnewvnode("fuse", mp, &fuse_vnops, vpp);
     if (err) {
@@ -135,8 +133,11 @@ fuse_vnode_alloc(struct mount *mp,
 
     vn_lock(*vpp, lkflags);
     err = insmntque(*vpp, mp);
+    ASSERT_VOP_ELOCKED(*vpp, "fuse_vnode_alloc");
     if (err) {
+        VOP_UNLOCK(*vpp, 0);
         free(fvdat, M_FUSEVN);
+        *vpp = NULL;
         return (err);
     }
 
@@ -145,6 +146,7 @@ fuse_vnode_alloc(struct mount *mp,
         td, &vp2, fuse_vnode_cmp, &nodeid);
 
     if (err) {
+        VOP_UNLOCK(*vpp, 0);
         fuse_vnode_destroy(*vpp);
 	*vpp = NULL;
         return (err);
@@ -156,6 +158,7 @@ fuse_vnode_alloc(struct mount *mp,
      */
     KASSERT(vp2 == NULL,
         ("vfs hash collision for node #%ju\n", (uintmax_t)nodeid));
+    ASSERT_VOP_ELOCKED(*vpp, "fuse_vnode_alloc");
 
     return (0);
 }
@@ -174,7 +177,7 @@ fuse_vnode_get(struct mount         *mp,
 
     debug_printf("dvp=%p\n", dvp);
 
-    err = fuse_vnode_alloc(mp, td, nodeid, vtyp, LK_EXCLUSIVE | LK_RETRY, vpp);
+    err = fuse_vnode_alloc(mp, td, nodeid, vtyp, vpp);
     if (err) {
         return err;
     }
