@@ -269,6 +269,10 @@ fuse_internal_rename(struct vnode *fdvp,
                      struct componentname *fcnp,
                      struct vnode *tdvp,
                      struct componentname *tcnp);
+/* revoke */
+
+void
+fuse_internal_vnode_disappear(struct vnode *vp);
 
 /* strategy */
 

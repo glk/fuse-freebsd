@@ -84,10 +84,7 @@ fuse_filehandle_open(struct vnode *vp,
     if ((err = fdisp_wait_answ(&fdi))) {
         debug_printf("OUCH ... daemon didn't give fh (err = %d)\n", err);
         if (err == ENOENT) {
-            /*
-             * See comment in fuse_vnop_reclaim().
-             */
-            cache_purge(vp);
+            fuse_internal_vnode_disappear(vp);
         }
         return err;
     }

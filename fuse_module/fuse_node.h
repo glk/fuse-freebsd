@@ -11,7 +11,8 @@
 
 #include "fuse_file.h"
 
-#define FN_CREATING      0x00000001
+#define FN_CREATING          0x00000002
+#define FN_REVOKED           0x00000020
 
 struct fuse_vnode_data {
     /** self **/

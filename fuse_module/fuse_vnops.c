@@ -126,6 +126,10 @@ int fuse_lookup_cache_enable = 1;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, lookup_cache_enable, CTLFLAG_RW,
            &fuse_lookup_cache_enable, 0, "");
 
+static int fuse_reclaim_inactive = 0;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, reclaim_inactive, CTLFLAG_RW,
+           &fuse_reclaim_inactive, 0, "");
+
 int fuse_pbuf_freecnt = -1;
 
 /*
@@ -484,7 +488,9 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
             /* see comment at similar place in fuse_statfs() */
             goto fake;
         }
-        debug_printf("fuse_getattr c: returning ENOTCONN\n");
+        if (err == ENOENT) {
+            fuse_internal_vnode_disappear(vp);
+        }
         return err;
     }
 
@@ -517,10 +523,15 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
              * vp->vtype = vap->v_type
              */
         } else {
-            /* stale vnode */
-            // XXX: vnode should be ditched.
-            debug_printf("fuse_getattr d: returning ENOTCONN\n");
-            return ENOTCONN;
+            /*
+             * STALE vnode, ditch
+             *
+             * The vnode has changed its type "behind our back". There's
+             * nothing really we can do, so let us just force an internal
+             * revocation.
+             */
+            fuse_internal_vnode_disappear(vp);
+            return EIO;
         }
     }
 
@@ -559,6 +570,10 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
         if (FUFH_IS_VALID(fufh)) {
             fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_BACKGROUNDED);
         }
+    }
+
+    if ((fvdat->flag & FN_REVOKED) != 0 || fuse_reclaim_inactive) {
+        vrecycle(vp, td);
     }
 
     return 0;
@@ -1416,7 +1431,7 @@ fuse_vnop_remove(struct vop_remove_args *ap)
     err = fuse_internal_remove(dvp, vp, cnp, FUSE_UNLINK);
 
     if (err == 0) {
-        cache_purge(vp);
+        fuse_internal_vnode_disappear(vp);
         fuse_invalidate_attr(dvp);
     }
 
@@ -1526,11 +1541,10 @@ fuse_vnop_rmdir(struct vop_rmdir_args *ap)
         return EINVAL;
     }
 
-    cache_purge(ap->a_vp);
-
-    err = fuse_internal_remove(ap->a_dvp, ap->a_vp, ap->a_cnp, FUSE_RMDIR);
+    err = fuse_internal_remove(dvp, vp, ap->a_cnp, FUSE_RMDIR);
 
     if (err == 0) {
+        fuse_internal_vnode_disappear(vp);
         fuse_invalidate_attr(dvp);
     }
 
@@ -1690,8 +1704,15 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
         if (vnode_vtype(vp) == VNON && vtyp != VNON) {
             debug_printf("FUSE: Dang! vnode_vtype is VNON and vtype isn't.\n");
         } else {
-            // XXX: should ditch vnode.
-            err = ENOTCONN;
+            /*
+             * STALE vnode, ditch
+             *
+             * The vnode has changed its type "behind our back". There's
+             * nothing really we can do, so let us just force an internal
+             * revocation and tell the caller to try again, if interested.
+             */
+            fuse_internal_vnode_disappear(vp);
+            err = EAGAIN;
         }
     }
 
