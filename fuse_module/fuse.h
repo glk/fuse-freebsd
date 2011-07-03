@@ -80,15 +80,6 @@
 #endif
 #endif
 
-#ifndef FUSELIB_CONFORM_BIOREAD
-/* 
- * make BIO behave as it's prescribed in fuselib's fuse.h,
- * ie. in case of buffered reading, short reads instruct
- * the kernel to fill the rest of the buffer with zeroes 
- */
-#define FUSELIB_CONFORM_BIOREAD 1
-#endif
-
 /* misc */
 
 extern int fuse_useco;

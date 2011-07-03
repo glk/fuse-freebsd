@@ -109,17 +109,18 @@ extern struct vop_vector fuse_vnops;
 
 void fuse_vnode_destroy(struct vnode *vp);
 
-int
-fuse_vnode_get(struct mount         *mp,
-               uint64_t              nodeid,
-               struct vnode         *dvp,
-               struct vnode        **vpp,
-               struct componentname *cnp,
-               enum vtype            vtyp,
-               uint64_t              size);
+int fuse_vnode_get(struct mount         *mp,
+                   uint64_t              nodeid,
+                   struct vnode         *dvp,
+                   struct vnode        **vpp,
+                   struct componentname *cnp,
+                   enum vtype            vtyp,
+                   uint64_t              size);
 
 void fuse_vnode_open(struct vnode *vp,
                      int32_t fuse_open_flags,
                      struct thread *td);
+
+void fuse_vnode_setsize(struct vnode *vp, off_t newsize);
 
 #endif /* _FUSE_NODE_H_ */

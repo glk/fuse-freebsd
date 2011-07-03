@@ -492,7 +492,7 @@ fuse_write_biobackend(struct fuse_io_data *fioda)
     daddr_t lbn;
     int bcount;
     int n, on, err = 0;
-    vm_ooffset_t fsize = vp->v_object->un_pager.vnp.vnp_size;
+    off_t fsize = VTOFUD(vp)->filesize;
 
     DEBUG2G("fsize %lld\n", (long long int)fsize); 
 
@@ -535,7 +535,7 @@ again:
                 long save;
 
                 fsize = uio->uio_offset + n;
-                vnode_pager_setsize(vp, fsize);
+		fuse_vnode_setsize(vp, fsize);
 
                 save = bp->b_flags & B_CACHE;
                 bcount += n;
@@ -558,7 +558,7 @@ again:
             bp = getblk(vp, lbn, bcount, PCATCH, 0, 0);
             if (uio->uio_offset + n > fsize) {
                 fsize = uio->uio_offset + n;
-                vnode_pager_setsize(vp, fsize);
+                fuse_vnode_setsize(vp, fsize);
             }
         }
 
@@ -701,6 +701,7 @@ int
 fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
     enum fuse_opcode op)
 {
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_dispatcher fdi;
     struct ucred *cred; 
     int err = 0;
@@ -751,12 +752,6 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
     if (bp->b_iocmd == BIO_READ) {
         struct fuse_read_in *fri;
         int ioff = 0;
-#if FUSELIB_CONFORM_BIOREAD
-        struct vattr va;
-
-        if ((err = VOP_GETATTR(vp, &va, cred)))
-            goto out;
-#endif
 
         bufdat = bp->b_data;
         bp->b_resid = bp->b_bcount;
@@ -772,15 +767,13 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
             fri = fdi.indata;
             fri->fh = fufh->fh_id;
             fri->offset = ((off_t)bp->b_blkno) * biosize + ioff;
-#if FUSELIB_CONFORM_BIOREAD
             chunksize = MIN(chunksize,
                 MIN(fri->offset + bp->b_resid,
-                va.va_size) - fri->offset);
+                fvdat->filesize) - fri->offset);
             if (chunksize == 0) {
                 respsize = -1;
                 goto eval;
             }
-#endif
             fri->size = chunksize;
             fdi.tick->tk_aw_type = FT_A_BUF;
             fdi.tick->tk_aw_bufdata = bufdat;
@@ -796,9 +789,7 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
             bufdat += respsize;
             ioff += respsize;
 
-#if FUSELIB_CONFORM_BIOREAD
 eval:
-#endif
             DEBUG2G("%d bytes asked for from offset %llu, passing on the %d we got\n",
                 chunksize, (long long unsigned)fri->offset, respsize);
 
@@ -811,10 +802,8 @@ eval:
                     bp->b_resid);
                 bzero((char *)bp->b_data + bp->b_bcount - bp->b_resid,
                     bp->b_resid);
-#if FUSELIB_CONFORM_BIOREAD
                 if (chunksize)
                     bp->b_resid = 0;
-#endif
                 break;
             }
             if (respsize > chunksize) {

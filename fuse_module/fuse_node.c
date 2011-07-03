@@ -25,14 +25,15 @@
 #include <sys/sysctl.h>
 #include <sys/fcntl.h>
 #include <sys/fnv_hash.h>
+#include <sys/priv.h>
+#include <security/mac/mac_framework.h>
+#include <vm/vm.h>
+#include <vm/vm_extern.h>
 
 #include "fuse.h"
 #include "fuse_node.h"
 #include "fuse_internal.h"
 #include "fuse_ipc.h"
-
-#include <sys/priv.h>
-#include <security/mac/mac_framework.h>
 
 #define FUSE_DEBUG_MODULE VNOPS
 #include "fuse_debug.h"
@@ -211,4 +212,13 @@ fuse_vnode_open(struct vnode *vp, int32_t fuse_open_flags, struct thread *td)
         /* XXXIP prevent getattr, by using cached node size */
         vnode_create_vobject(vp, 0, td);
     }
+}
+
+void
+fuse_vnode_setsize(struct vnode *vp, off_t newsize)
+{
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
+
+    vnode_pager_setsize(vp, newsize);
+    fvdat->filesize = newsize;
 }
