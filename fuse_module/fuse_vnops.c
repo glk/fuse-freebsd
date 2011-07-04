@@ -132,6 +132,18 @@ SYSCTL_INT(_vfs_fuse, OID_AUTO, reclaim_inactive, CTLFLAG_RW,
 
 int fuse_pbuf_freecnt = -1;
 
+#if __FreeBSD_version >= 900011
+#define fuse_vm_page_lock(m)		vm_page_lock((m));
+#define fuse_vm_page_unlock(m)		vm_page_unlock((m));
+#define fuse_vm_page_lock_queues()	((void)0)
+#define fuse_vm_page_unlock_queues()	((void)0)
+#else
+#define fuse_vm_page_lock(m)		((void)0)
+#define fuse_vm_page_unlock(m)		((void)0)
+#define fuse_vm_page_lock_queues()	vm_page_lock_queues()
+#define fuse_vm_page_unlock_queues()	vm_page_unlock_queues()
+#endif
+
 /*
     struct vnop_access_args {
         struct vnode *a_vp;
@@ -1898,19 +1910,22 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 		vm_page_t m = pages[ap->a_reqpage];
 
 		VM_OBJECT_LOCK(vp->v_object);
-		vm_page_lock_queues();
+		fuse_vm_page_lock_queues();
 		if (m->valid != 0) {
 			/* handled by vm_fault now	  */
 			/* vm_page_zero_invalid(m, TRUE); */
 			for (i = 0; i < npages; ++i) {
-				if (i != ap->a_reqpage)
+				if (i != ap->a_reqpage) {
+					fuse_vm_page_lock(pages[i]);
 					vm_page_free(pages[i]);
+					fuse_vm_page_unlock(pages[i]);
+				}
 			}
-			vm_page_unlock_queues();
+			fuse_vm_page_unlock_queues();
 			VM_OBJECT_UNLOCK(vp->v_object);
 			return(0);
 		}
-		vm_page_unlock_queues();
+		fuse_vm_page_unlock_queues();
 		VM_OBJECT_UNLOCK(vp->v_object);
 	}
 
@@ -1947,12 +1962,15 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 	if (error && (FUSE_PAGEOPS_RESID == count)) {
 		DEBUG2G("error %d\n", error);
 		VM_OBJECT_LOCK(vp->v_object);
-		vm_page_lock_queues();
+		fuse_vm_page_lock_queues();
 		for (i = 0; i < npages; ++i) {
-			if (i != ap->a_reqpage)
+			if (i != ap->a_reqpage) {
+				fuse_vm_page_lock(pages[i]);
 				vm_page_free(pages[i]);
+				fuse_vm_page_unlock(pages[i]);
+			}
 		}
-		vm_page_unlock_queues();
+		fuse_vm_page_unlock_queues();
 		VM_OBJECT_UNLOCK(vp->v_object);
 		return VM_PAGER_ERROR;
 	}
@@ -1965,7 +1983,7 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 
 	size = count - FUSE_PAGEOPS_RESID;
 	VM_OBJECT_LOCK(vp->v_object);
-	vm_page_lock_queues();
+	fuse_vm_page_lock_queues();
 	for (i = 0, toff = 0; i < npages; i++, toff = nextoff) {
 		vm_page_t m;
 		nextoff = toff + PAGE_SIZE;
@@ -2007,21 +2025,24 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 			 * now tell them that it is ok to use.
 			 */
 			if (!error) {
-#ifdef VPO_WANTED
-				if (m->oflags & VPO_WANTED)
-#else
-				if (m->flags & PG_WANTED)
-#endif
+				if (m->oflags & VPO_WANTED) {
+					fuse_vm_page_lock(m);
 					vm_page_activate(m);
-				else
+					fuse_vm_page_unlock(m);
+				} else {
+					fuse_vm_page_lock(m);
 					vm_page_deactivate(m);
+					fuse_vm_page_unlock(m);
+				}
 				vm_page_wakeup(m);
 			} else {
+				fuse_vm_page_lock(m);
 				vm_page_free(m);
+				fuse_vm_page_unlock(m);
 			}
 		}
 	}
-	vm_page_unlock_queues();
+	fuse_vm_page_unlock_queues();
 	VM_OBJECT_UNLOCK(vp->v_object);
 	return 0;
 }
