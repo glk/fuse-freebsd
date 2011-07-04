@@ -1225,7 +1225,7 @@ fuse_vnop_read(struct vop_read_args *ap)
         return EIO;
     }
 
-    return fuse_io_vnode(vp, uio, ioflag, cred);
+    return fuse_io_dispatch(vp, uio, ioflag, cred);
 }
 
 /*
@@ -1827,21 +1827,8 @@ fuse_vnop_write(struct vop_write_args *ap)
         return EIO;
     }
 
-    return fuse_io_vnode(vp, uio, ioflag, cred);
+    return fuse_io_dispatch(vp, uio, ioflag, cred);
 }
-
-/*
- * [gs]etpages taken & stripped off from nfsclient
- */
-
-#ifndef PAGEOP_TRANSLATE_UIO
-#define PAGEOP_TRANSLATE_UIO 1
-#endif
-#if PAGEOP_TRANSLATE_UIO
-#define FUSE_PAGEOPS_RESID uio.uio_resid
-#else
-#define FUSE_PAGEOPS_RESID bp->b_resid
-#endif
 
 /*
     struct vnop_getpages_args {
@@ -1856,10 +1843,8 @@ static int
 fuse_vnop_getpages(struct vop_getpages_args *ap)
 {
 	int i, error, nextoff, size, toff, count, npages;
-#if PAGEOP_TRANSLATE_UIO
 	struct uio uio;
 	struct iovec iov;
-#endif
 	vm_offset_t kva;
 	struct buf *bp;
 	struct vnode *vp;
@@ -1889,28 +1874,22 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 	 * can only occur at the file EOF.
 	 */
 
-	{
-		vm_page_t m = pages[ap->a_reqpage];
-
-		VM_OBJECT_LOCK(vp->v_object);
-		fuse_vm_page_lock_queues();
-		if (m->valid != 0) {
-			/* handled by vm_fault now	  */
-			/* vm_page_zero_invalid(m, TRUE); */
-			for (i = 0; i < npages; ++i) {
-				if (i != ap->a_reqpage) {
-					fuse_vm_page_lock(pages[i]);
-					vm_page_free(pages[i]);
-					fuse_vm_page_unlock(pages[i]);
-				}
+	VM_OBJECT_LOCK(vp->v_object);
+	fuse_vm_page_lock_queues();
+	if (pages[ap->a_reqpage]->valid != 0) {
+		for (i = 0; i < npages; ++i) {
+			if (i != ap->a_reqpage) {
+				fuse_vm_page_lock(pages[i]);
+				vm_page_free(pages[i]);
+				fuse_vm_page_unlock(pages[i]);
 			}
-			fuse_vm_page_unlock_queues();
-			VM_OBJECT_UNLOCK(vp->v_object);
-			return(0);
 		}
 		fuse_vm_page_unlock_queues();
 		VM_OBJECT_UNLOCK(vp->v_object);
+		return 0;
 	}
+	fuse_vm_page_unlock_queues();
+	VM_OBJECT_UNLOCK(vp->v_object);
 
 	/*
 	 * We use only the kva address for the buffer, but this is extremely
@@ -1920,10 +1899,9 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 
 	kva = (vm_offset_t) bp->b_data;
 	pmap_qenter(kva, pages, npages);
-	cnt.v_vnodein++;
-	cnt.v_vnodepgsin += npages;
+	PCPU_INC(cnt.v_vnodein);
+	PCPU_ADD(cnt.v_vnodepgsin, npages);
 
-#if PAGEOP_TRANSLATE_UIO
 	iov.iov_base = (caddr_t) kva;
 	iov.iov_len = count;
 	uio.uio_iov = &iov;
@@ -1934,16 +1912,13 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 	uio.uio_rw = UIO_READ;
 	uio.uio_td = td;
 
-	error = fuse_io_dispatch(vp, &uio, FREAD | O_DIRECT, cred);
-#else
-	error = fuse_io_strategy(vp, bp);
-#endif
+	error = fuse_io_dispatch(vp, &uio, IO_DIRECT, cred);
 	pmap_qremove(kva, npages);
 
 	relpbuf(bp, &fuse_pbuf_freecnt);
 
-	if (error && (FUSE_PAGEOPS_RESID == count)) {
-		DEBUG2G("error %d\n", error);
+	if (error && (uio.uio_resid == count)) {
+		DEBUG("error %d\n", error);
 		VM_OBJECT_LOCK(vp->v_object);
 		fuse_vm_page_lock_queues();
 		for (i = 0; i < npages; ++i) {
@@ -1964,7 +1939,7 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 	 * does not mean that the remaining data is invalid!
 	 */
 
-	size = count - FUSE_PAGEOPS_RESID;
+	size = count - uio.uio_resid;
 	VM_OBJECT_LOCK(vp->v_object);
 	fuse_vm_page_lock_queues();
 	for (i = 0, toff = 0; i < npages; i++, toff = nextoff) {
@@ -1977,15 +1952,16 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 			 * Read operation filled an entire page
 			 */
 			m->valid = VM_PAGE_BITS_ALL;
-			vm_page_undirty(m);
+			KASSERT(m->dirty == 0,
+			    ("fuse_getpages: page %p is dirty", m));
 		} else if (size > toff) {
 			/*
 			 * Read operation filled a partial page.
 			 */
 			m->valid = 0;
-			vm_page_set_validclean(m, 0, size - toff);
-			/* handled by vm_fault now	  */
-			/* vm_page_zero_invalid(m, TRUE); */
+			vm_page_set_valid(m, 0, size - toff);
+			KASSERT(m->dirty == 0,
+			    ("fuse_getpages: page %p is dirty", m));
 		} else {
 			/*
 			 * Read operation was short.  If no error occured
@@ -2043,10 +2019,8 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 static int
 fuse_vnop_putpages(struct vop_putpages_args *ap)
 {
-#if PAGEOP_TRANSLATE_UIO
 	struct uio uio;
 	struct iovec iov;
-#endif
 	vm_offset_t kva;
 	struct buf *bp;
 	int i, error, npages, count;
@@ -2096,10 +2070,9 @@ fuse_vnop_putpages(struct vop_putpages_args *ap)
 
 	kva = (vm_offset_t) bp->b_data;
 	pmap_qenter(kva, pages, npages);
-	cnt.v_vnodeout++;
-	cnt.v_vnodepgsout += count;
+	PCPU_INC(cnt.v_vnodeout);
+	PCPU_ADD(cnt.v_vnodepgsout, count);
 
-#if PAGEOP_TRANSLATE_UIO
 	iov.iov_base = (caddr_t) kva;
 	iov.iov_len = count;
 	uio.uio_iov = &iov;
@@ -2110,16 +2083,13 @@ fuse_vnop_putpages(struct vop_putpages_args *ap)
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_td = td;
 
-	error = fuse_io_dispatch(vp, &uio, FWRITE | O_DIRECT, cred);
-#else
-	error = fuse_io_strategy(vp, bp);
-#endif
+	error = fuse_io_dispatch(vp, &uio, IO_DIRECT, cred);
 
 	pmap_qremove(kva, npages);
 	relpbuf(bp, &fuse_pbuf_freecnt);
 
 	if (!error) {
-		int nwritten = round_page(count - FUSE_PAGEOPS_RESID) / PAGE_SIZE;
+		int nwritten = round_page(count - uio.uio_resid) / PAGE_SIZE;
 		for (i = 0; i < nwritten; i++) {
 			rtvals[i] = VM_PAGER_OK;
 			vm_page_undirty(pages[i]);
@@ -2127,7 +2097,6 @@ fuse_vnop_putpages(struct vop_putpages_args *ap)
 	}
 	return rtvals[0];
 }
-#undef FUSE_PAGEOPS_RESID
 
 /*
     struct vnop_print_args {

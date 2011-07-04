@@ -18,9 +18,7 @@ struct fuse_io_data {
     void *param;
 };
 
-int fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
-    struct ucred *cred);
-int fuse_io_vnode(struct vnode *vp, struct uio *uio, int ioflag,
+int fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
     struct ucred *cred);
 int fuse_io_strategy(struct vnode *vp, struct buf *bp,
     struct fuse_filehandle *fufh, enum fuse_opcode op);
