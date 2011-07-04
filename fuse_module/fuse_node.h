@@ -39,12 +39,6 @@ struct fuse_vnode_data {
     uint64_t          nlookup;
     enum vtype        vtype;
 
-    /** locking **/
-
-    struct sx  create_lock;
-    struct cv  create_cv;
-    lwpid_t    create_owner;
-
     /*
      * The nodelock must be held when data in the FUSE node is accessed or
      * modified. Typically, we would take this lock at the beginning of a

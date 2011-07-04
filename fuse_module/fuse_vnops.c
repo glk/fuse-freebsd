@@ -1188,36 +1188,6 @@ fuse_vnop_open(struct vop_open_args *ap)
         fufh_type = fuse_filehandle_xlate_from_fflags(mode);
     }
 
-    if (!isdir && (fvdat->flag & FN_CREATING)) {
-
-        sx_xlock(&fvdat->create_lock);
-
-        if (fvdat->flag & FN_CREATING) { // check again
-            if (fvdat->create_owner == curthread->td_tid) {
-                fufh_type = FUFH_RDWR;
-                MPASS(fuse_filehandle_valid(vp, fufh_type));
-                fvdat->flag &= ~FN_CREATING;
-                sx_xunlock(&fvdat->create_lock);
-                cv_broadcast(&fvdat->create_cv); // wake up all
-                return 0;
-            } else {
-                debug_printf("contender going to sleep\n");
-                error = cv_wait_sig(&fvdat->create_cv, &fvdat->create_lock);
-                debug_printf("contender awake (error = %d)\n", error);
-                if (error) {
-                    /*
-                     * We'll be woken up in case a signal arrives.
-                     * The value of error could be EINTR or ERESTART.
-                     */
-                    return error;
-                }
-            }
-        } else {
-            sx_xunlock(&fvdat->create_lock);
-            /* Can proceed from here. */
-        }
-    }
-
     if (fuse_filehandle_valid(vp, fufh_type)) {
         fuse_vnode_open(vp, 0, td);
         return 0;

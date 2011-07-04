@@ -56,9 +56,6 @@ fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     }
     vp->v_type = vtyp;
     vp->v_data = fvdat;
-    fvdat->create_owner = curthread->td_tid;
-    cv_init(&fvdat->create_cv, "fuse node create cv");
-    sx_init(&fvdat->create_lock, "fuse node create lock");
     sx_init(&fvdat->nodelock, "fuse node sx lock");
     sx_init(&fvdat->truncatelock, "fuse node truncate sx lock");
 
@@ -74,8 +71,6 @@ fuse_vnode_destroy(struct vnode *vp)
     struct fuse_vnode_data *fvdat = vp->v_data;
 
     vp->v_data = NULL;
-    cv_destroy(&fvdat->create_cv);
-    sx_destroy(&fvdat->create_lock);
     sx_destroy(&fvdat->nodelock);
     sx_destroy(&fvdat->truncatelock);
     free(fvdat, M_FUSEVN);
