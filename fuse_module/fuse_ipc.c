@@ -195,6 +195,7 @@ static int
 fticket_wait_answer(struct fuse_ticket *ftick)
 {
     int err = 0;
+    struct fuse_data *data;
 
     debug_printf("ftick=%p\n", ftick);
     fuse_lck_mtx_lock(ftick->tk_aw_mtx);
@@ -203,13 +204,25 @@ fticket_wait_answer(struct fuse_ticket *ftick)
         goto out;
     }
 
-    if (fdata_get_dead(ftick->tk_data)) {
+    data = ftick->tk_data;
+
+    if (fdata_get_dead(data)) {
         err = ENOTCONN;
         fticket_set_answered(ftick);
         goto out;
     }
 
-    err = msleep(ftick, &ftick->tk_aw_mtx, PCATCH, "fu_ans", 0);
+    err = msleep(ftick, &ftick->tk_aw_mtx, PCATCH, "fu_ans",
+                 data->daemon_timeout * hz);
+    if (err == EAGAIN) { /* same as EWOULDBLOCK */
+#ifdef XXXIP /* die conditionally */
+        if (!fdata_get_dead(data)) {
+            fdata_set_dead(data);
+        }
+#endif
+        err = ETIMEDOUT;
+        fticket_set_answered(ftick);
+    }
 
 out:
     fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
@@ -301,6 +314,7 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
     data->ticketer = 0;
     data->freeticket_counter = 0;
     data->daemoncred = crhold(cred);
+    data->daemon_timeout = FUSE_DEFAULT_DAEMON_TIMEOUT;
 
 #ifdef FUSE_EXPLICIT_RENAME_LOCK
     sx_init(&data->rename_lock, "fuse rename lock");

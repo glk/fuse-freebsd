@@ -6,6 +6,11 @@
 #include "fuse4bsd.h"
 #include "fuse_kernel.h"
 
+#define FUSE_DEFAULT_DAEMON_TIMEOUT                60     /* s */
+#define FUSE_MIN_DAEMON_TIMEOUT                    0      /* s */
+#define FUSE_MAX_DAEMON_TIMEOUT                    600    /* s */
+
+
 /* Mapping versions to features */
 
 #define FUSE_KERNELABI_GEQ(maj, min)	\

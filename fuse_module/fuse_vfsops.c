@@ -85,6 +85,7 @@ fuse_vfsop_mount(struct mount *mp)
     int __mntopts = 0;
     int max_read_set = 0;
     uint32_t max_read = ~0;
+    int daemon_timeout;
 
     size_t len;
 
@@ -208,6 +209,13 @@ fuse_vfsop_mount(struct mount *mp)
 
     if (vfs_scanopt(opts, "max_read=", "%u", &max_read) == 1)
     max_read_set = 1;
+    if (vfs_scanopt(opts, "timeout=", "%u", &daemon_timeout) == 1) {
+	    if (daemon_timeout < FUSE_MIN_DAEMON_TIMEOUT)
+		    daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
+	    else if (daemon_timeout > FUSE_MAX_DAEMON_TIMEOUT)
+		    daemon_timeout = FUSE_MAX_DAEMON_TIMEOUT;
+	    data->daemon_timeout = daemon_timeout;
+    }
     subtype = vfs_getopts(opts, "subtype=", &err);
     err = 0;
 

@@ -146,6 +146,8 @@ struct fuse_data {
     char                       volname[MAXPATHLEN];
 
     struct selinfo ks_rsel;
+
+    int                        daemon_timeout;
 };
 
 #define FSESS_DEAD                0x0001 // session is to be closed
