@@ -307,6 +307,14 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
     }
 
     /* There is 1 extra root vnode reference (mp->mnt_data). */
+    FUSE_LOCK();
+    if (data->vroot != NULL) {
+        struct vnode *vroot = data->vroot;
+        data->vroot = NULL;
+        FUSE_UNLOCK();
+        vrele(vroot);
+    } else
+        FUSE_UNLOCK();
     err = vflush(mp, 0, flags, td);
     if (err) {
         debug_printf("vflush failed");
@@ -352,9 +360,34 @@ alreadydead:
 static int
 fuse_vfsop_root(struct mount *mp, int lkflags, struct vnode **vpp)
 {
+    struct fuse_data *data = fuse_get_mpdata(mp);
     int err = 0;
 
-    err = fuse_vnode_get(mp, FUSE_ROOT_ID, NULL, vpp, NULL, VDIR, 0);
+    if (data->vroot != NULL) {
+        err = vget(data->vroot, lkflags, curthread);
+        if (err == 0)
+            *vpp = data->vroot;
+    } else {
+        err = fuse_vnode_get(mp, FUSE_ROOT_ID, NULL, vpp, NULL, VDIR, 0);
+        if (err == 0) {
+            FUSE_LOCK();
+            MPASS(data->vroot == NULL || data->vroot == *vpp);
+            if (data->vroot == NULL) {
+                DEBUG("new root vnode\n");
+                data->vroot = *vpp;
+                FUSE_UNLOCK();
+                vref(*vpp);
+            } else if (data->vroot != *vpp) {
+                DEBUG("root vnode race\n");
+                FUSE_UNLOCK();
+                VOP_UNLOCK(*vpp, 0);
+                vrele(*vpp);
+                vrecycle(*vpp, curthread);
+                *vpp = data->vroot;
+            } else
+                FUSE_UNLOCK();
+        }
+    }
     return err;
 }
 

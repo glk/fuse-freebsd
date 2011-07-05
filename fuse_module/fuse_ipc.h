@@ -116,6 +116,7 @@ enum mountpri { FM_NOMOUNTED, FM_PRIMARY, FM_SECONDARY };
 struct fuse_data {
     struct cdev               *fdev;
     struct mount              *mp;
+    struct vnode              *vroot;
     enum mountpri              mpri;
     int                        mntco;
     struct ucred              *daemoncred;
