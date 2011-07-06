@@ -1740,7 +1740,7 @@ fuse_vnop_strategy(struct vop_strategy_args *ap)
     if (bp->b_iocmd == BIO_WRITE)
 	    fuse_vnode_refreshsize(vp, NOCRED);
 
-    (void)fuse_io_strategy(vp, bp, NULL, 0);
+    (void)fuse_io_strategy(vp, bp);
 
     /* 
      * This is a dangerous function. If returns error, that might mean a

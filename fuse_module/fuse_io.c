@@ -38,26 +38,34 @@
 #include "fuse.h"
 #include "fuse_file.h"
 #include "fuse_node.h"
+#include "fuse_internal.h"
 #include "fuse_ipc.h"
 #include "fuse_io.h"
 
 #define FUSE_DEBUG_MODULE IO
 #include "fuse_debug.h"
 
-static int fuse_read_directbackend(struct fuse_io_data *fioda);
-static int fuse_read_biobackend(struct fuse_io_data *fioda);
-static int fuse_write_directbackend(struct fuse_io_data *fioda);
-static int fuse_write_biobackend(struct fuse_io_data *fioda);
 
-static fuse_buffeater_t fuse_std_buffeater; 
+static int fuse_read_directbackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh);
+static int fuse_read_biobackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh);
+static int fuse_write_directbackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh);
+static int fuse_write_biobackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh);
+
+static int fuse_std_buffeater(struct uio *uio, size_t reqsize, void *buf,
+    size_t bufsize, void *param);
 
 int
 fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
     struct ucred *cred)
 {
     struct fuse_filehandle *fufh;
-    struct fuse_io_data fioda;
     int err, directio;
+
+    MPASS(vp->v_type == VREG);
 
     err = fuse_filehandle_getrw(vp,
         (uio->uio_rw == UIO_READ) ? FUFH_RDONLY : FUFH_WRONLY, &fufh);
@@ -65,13 +73,6 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
         DEBUG("fetching filehandle failed\n");
         return err;
     }
-
-    bzero(&fioda, sizeof(fioda));
-    fioda.vp = vp;
-    fioda.fufh = fufh;
-    fioda.uio = uio;
-    fioda.cred = cred;
-    fioda.td = curthread;
 
     /*
      * Ideally, when the daemon asks for direct io at open time, the
@@ -87,26 +88,23 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
 
     switch (uio->uio_rw) {
     case UIO_READ:
-        fioda.opcode = FUSE_READ;
-        fioda.buffeater = fuse_std_buffeater;
-
         if (directio) {
             DEBUG("direct read of vnode %ju via file handle %ju\n",
                 (uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);
-            err = fuse_read_directbackend(&fioda);
+            err = fuse_read_directbackend(vp, uio, cred, fufh);
         } else {
             DEBUG("buffered read of vnode %ju\n", (uintmax_t)VTOILLU(vp));
-            err = fuse_read_biobackend(&fioda);
+            err = fuse_read_biobackend(vp, uio, cred, fufh);
         }
         break;
     case UIO_WRITE:
         if (directio) {
             DEBUG("direct write of vnode %ju via file handle %ju\n",
                 (uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);
-            err = fuse_write_directbackend(&fioda);
+            err = fuse_write_directbackend(vp, uio, cred, fufh);
         } else {
             DEBUG("buffered write of vnode %ju\n", (uintmax_t)VTOILLU(vp));
-            err = fuse_write_biobackend(&fioda);
+            err = fuse_write_biobackend(vp, uio, cred, fufh);
         }
         break;
     default:
@@ -119,30 +117,28 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
 }
 
 static int
-fuse_read_biobackend(struct fuse_io_data *fioda)
+fuse_read_biobackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh)
 {
-
-    struct vnode *vp = fioda->vp;
-    struct fuse_filehandle *fufh = fioda->fufh;
-    struct uio *uio = fioda->uio;
-    enum fuse_opcode op = fioda->opcode;
-    fuse_buffeater_t *buffe = fioda->buffeater;
-    void *param = fioda->param;
-
-    int biosize;
     struct buf *bp;
     daddr_t lbn;
     int bcount;
-    int bbcount;
     int err = 0, n = 0, on = 0;
+    off_t filesize;
+
+    const int biosize = fuse_iosize(vp);
+
+    DEBUG("resid=%zx offset=%jx fsize=%jx\n",
+        uio->uio_resid, uio->uio_offset, VTOFUD(vp)->filesize);
 
     if (uio->uio_resid == 0)
         return (0);
+    if (uio->uio_offset < 0)
+        return (EINVAL);
 
-    biosize = vp->v_mount->mnt_stat.f_iosize;
     bcount = MIN(MAXBSIZE, biosize);
+    filesize = VTOFUD(vp)->filesize;
 
-    DEBUG2G("entering loop\n");
     do {
         lbn = uio->uio_offset / biosize;
         on = uio->uio_offset & (biosize - 1);
@@ -160,6 +156,11 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
          *
          * Note that bcount is *not* DEV_BSIZE aligned.
          */
+        if ((off_t)lbn * biosize >= filesize) {
+            bcount = 0;
+        } else if ((off_t)(lbn + 1) * biosize > filesize) {
+            bcount = filesize - (off_t)lbn * biosize;
+        }
 
         bp = getblk(vp, lbn, bcount, PCATCH, 0, 0);
 
@@ -174,7 +175,7 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
         if ((bp->b_flags & B_CACHE) == 0) {
             bp->b_iocmd = BIO_READ;
             vfs_busy_pages(bp, 0);
-            err = fuse_io_strategy(vp, bp, fufh, op);
+            err = fuse_io_strategy(vp, bp);
             if (err) {
                 brelse(bp);
                 return (err);
@@ -190,22 +191,13 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
          */
 
         n = 0;
-        /*
-         * If we zero pad the buf, bp->b_resid will be 0, so then
-         * just ignore it
-         */
-        bbcount = bcount - bp->b_resid;
-        if (on < bbcount)
-            n = bbcount - on;
+        if (on < bcount)
+            n = MIN((unsigned)(bcount - on), uio->uio_resid);
         if (n > 0) {
             DEBUG2G("feeding buffeater with %d bytes of buffer %p, saying %d was asked for\n",
                 n, bp->b_data + on, n + (int)bp->b_resid);
-#if 0 && _DEBUG
-            prettyprint(bp->b_data + on, n);
-            printf("\n");
-#endif
-            err = buffe(uio, n + bp->b_resid, bp->b_data + on, n,
-                param);
+            err = fuse_std_buffeater(uio, n + bp->b_resid, bp->b_data + on, n,
+                NULL);
         }
         brelse(bp);
         DEBUG2G("end of turn, err %d, uio->uio_resid %zd, n %d\n",
@@ -216,25 +208,15 @@ fuse_read_biobackend(struct fuse_io_data *fioda)
 }
 
 static int
-fuse_read_directbackend(struct fuse_io_data *fioda)
+fuse_read_directbackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh)
 {
-    struct vnode *vp = fioda->vp;
-    struct fuse_filehandle *fufh = fioda->fufh;
-    struct uio *uio = fioda->uio;
-    struct ucred *cred = fioda->cred;
-    struct thread *td = fioda->td;
-    enum fuse_opcode op = fioda->opcode;
-    fuse_buffeater_t *buffe = fioda->buffeater;
-    void *param = fioda->param;
-
     struct fuse_dispatcher fdi;
     struct fuse_read_in *fri;
     int err = 0;
 
     if (uio->uio_resid == 0)
         return (0);
-
-    DEBUG("bug daemon for food\n");
 
     fdisp_init(&fdi, 0);
 
@@ -248,7 +230,7 @@ fuse_read_directbackend(struct fuse_io_data *fioda)
      */
     while (uio->uio_resid > 0) {
         fdi.iosize = sizeof(*fri);
-        fdisp_make_vp(&fdi, op, vp, td, cred);
+        fdisp_make_vp(&fdi, FUSE_READ, vp, uio->uio_td, cred);
         fri = fdi.indata;
         fri->fh = fufh->fh_id;
         fri->offset = uio->uio_offset;
@@ -260,10 +242,11 @@ fuse_read_directbackend(struct fuse_io_data *fioda)
         if ((err = fdisp_wait_answ(&fdi)))
             goto out;
 
-        DEBUG2G("%zd bytes asked for from offset %ju, passing on the %jd we got\n",
-            uio->uio_resid, (uintmax_t)uio->uio_offset, (uintmax_t)fdi.iosize);
+        DEBUG2G("complete: got iosize=%d, requested fri.size=%zd; "
+            "resid=%zd offset=%ju\n",
+            fri->size, fdi.iosize, uio->uio_resid, (uintmax_t)uio->uio_offset);
 
-        if ((err = buffe(uio, fri->size, fdi.answ, fdi.iosize, param)))
+        if ((err = fuse_std_buffeater(uio, fri->size, fdi.answ, fdi.iosize, NULL)))
             break;
     }
 
@@ -290,18 +273,14 @@ fuse_std_buffeater(struct uio *uio, size_t reqsize, void *buf, size_t bufsize, v
 
 
 static int
-fuse_write_directbackend(struct fuse_io_data *fioda)
+fuse_write_directbackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh)
 {	
-    struct vnode *vp = fioda->vp;
-    uint64_t fh_id = fioda->fufh->fh_id;
-    struct uio *uio = fioda->uio;
-    struct ucred *cred = fioda->cred;
-    struct thread *td = fioda->td;
-
-    size_t chunksize;
-    int diff;
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_write_in *fwi;
     struct fuse_dispatcher fdi;
+    size_t chunksize;
+    int diff;
     int err = 0;
 
     if (! uio->uio_resid)
@@ -314,10 +293,10 @@ fuse_write_directbackend(struct fuse_io_data *fioda)
             fuse_get_mpdata(vp->v_mount)->max_write);
 
         fdi.iosize = sizeof(*fwi) + chunksize;
-        fdisp_make_vp(&fdi, FUSE_WRITE, vp, td, cred);
+        fdisp_make_vp(&fdi, FUSE_WRITE, vp, uio->uio_td, cred);
 
         fwi = fdi.indata;
-        fwi->fh = fh_id;
+        fwi->fh = fufh->fh_id;
         fwi->offset = uio->uio_offset;
         fwi->size = chunksize;
 
@@ -336,6 +315,8 @@ fuse_write_directbackend(struct fuse_io_data *fioda)
 
         uio->uio_resid += diff;
         uio->uio_offset -= diff; 
+        if (uio->uio_offset > fvdat->filesize)
+            fuse_vnode_setsize(vp, uio->uio_offset);
     }
 
     fuse_ticket_drop(fdi.tick);
@@ -344,23 +325,26 @@ fuse_write_directbackend(struct fuse_io_data *fioda)
 }
 
 static int
-fuse_write_biobackend(struct fuse_io_data *fioda)
+fuse_write_biobackend(struct vnode *vp, struct uio *uio,
+    struct ucred *cred, struct fuse_filehandle *fufh)
 {
-    struct vnode *vp = fioda->vp;
-    struct uio *uio = fioda->uio;
-    struct ucred *cred = fioda->cred;
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
-
-    int biosize;
-
     struct buf *bp;
     daddr_t lbn;
     int bcount;
     int n, on, err = 0;
 
-    DEBUG2G("fsize %ju\n", (uintmax_t)fvdat->filesize);
+    const int biosize = fuse_iosize(vp);
 
-    biosize = vp->v_mount->mnt_stat.f_iosize;
+    KASSERT(uio->uio_rw == UIO_WRITE, ("ncl_write mode"));
+    DEBUG("resid=%zx offset=%jx fsize=%jx\n",
+        uio->uio_resid, uio->uio_offset, fvdat->filesize);
+    if (vp->v_type != VREG)
+        return (EIO);
+    if (uio->uio_offset < 0)
+        return (EINVAL);
+    if (uio->uio_resid == 0)
+        return (0);
 
     /*
      * Find all of this file's B_NEEDCOMMIT buffers.  If our writes
@@ -383,7 +367,6 @@ again:
          * Handle direct append and file extension cases, calculate
          * unaligned buffer size.
          */
-
         if (uio->uio_offset == fvdat->filesize && n) {
             /*
              * Get the buffer (in its pre-append state to maintain
@@ -457,7 +440,7 @@ again:
         if ((bp->b_flags & B_CACHE) == 0) {
             bp->b_iocmd = BIO_READ;
             vfs_busy_pages(bp, 0);
-            fuse_io_strategy(vp, bp, NULL, 0);
+            fuse_io_strategy(vp, bp);
             if ((err = bp->b_error)) {
                 brelse(bp);
                 break;
@@ -476,7 +459,7 @@ again:
          */
 
         if (bp->b_dirtyend > bcount) {
-            DEBUG("Fuse append race @%lx:%d\n",
+            DEBUG("FUSE append race @%lx:%d\n",
                 (long)bp->b_blkno * biosize,
                 bp->b_dirtyend - bcount);
             bp->b_dirtyend = bcount;
@@ -550,8 +533,8 @@ again:
             vfs_bio_set_valid(bp, on, n);
         }
 
-        bwrite(bp);
-        if ((err =  bp->b_error))
+        err = bwrite(bp);
+        if (err)
             break;
     } while (uio->uio_resid > 0 && n > 0);
 
@@ -559,18 +542,144 @@ again:
 }
 
 int
-fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
-    enum fuse_opcode op)
+fuse_io_strategy(struct vnode *vp, struct buf *bp)
+#if 0
 {
+    struct fuse_filehandle *fufh;
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    struct ucred *cred;
+    struct uio *uiop;
+    struct uio uio;
+    struct iovec io;
+    int error = 0;
+
+    const int biosize = fuse_iosize(vp);
+
+    MPASS(vp->v_type == VREG);
+    MPASS(bp->b_iocmd == BIO_READ || bp->b_iocmd == BIO_WRITE);
+    DEBUG("inode=%jd offset=%jd resid=%jd\n",
+        VTOI(vp), ((off_t)bp->b_blkno) * biosize, bp->b_bcount);
+
+    error = fuse_filehandle_getrw(vp,
+	(bp->b_iocmd == BIO_READ) ? FUFH_RDONLY : FUFH_WRONLY, &fufh);
+    if (error) {
+        DEBUG("fetching filehandle failed\n");
+        bp->b_ioflags |= BIO_ERROR;
+        bp->b_error = error;
+        return (error);
+    }
+
+    cred = bp->b_iocmd == BIO_READ ? bp->b_rcred : bp->b_wcred;
+
+    uiop = &uio;
+    uiop->uio_iov = &io;
+    uiop->uio_iovcnt = 1;
+    uiop->uio_segflg = UIO_SYSSPACE;
+    uiop->uio_td = curthread;
+
+    /*
+     * clear BIO_ERROR and B_INVAL state prior to initiating the I/O.  We
+     * do this here so we do not have to do it in all the code that
+     * calls us.
+     */
+    bp->b_flags &= ~B_INVAL;
+    bp->b_ioflags &= ~BIO_ERROR;
+
+    KASSERT(!(bp->b_flags & B_DONE),
+        ("fuse_io_strategy: bp %p already marked done", bp));
+    if (bp->b_iocmd == BIO_READ) {
+        io.iov_len = uiop->uio_resid = bp->b_bcount;
+        io.iov_base = bp->b_data;
+        uiop->uio_rw = UIO_READ;
+
+        uiop->uio_offset = ((off_t)bp->b_blkno) * biosize;
+        error = fuse_read_directbackend(vp, uiop, cred, fufh);
+
+        if (!error && uiop->uio_resid) {
+            /*
+             * If we had a short read with no error, we must have
+             * hit a file hole.  We should zero-fill the remainder.
+             * This can also occur if the server hits the file EOF.
+             *
+             * Holes used to be able to occur due to pending
+             * writes, but that is not possible any longer.
+             */
+            int nread = bp->b_bcount - uiop->uio_resid;
+            int left  = uiop->uio_resid;
+
+            if (left > 0)
+                bzero((char *)bp->b_data + nread, left);
+            uiop->uio_resid = 0;
+        }
+        if (error) {
+            bp->b_ioflags |= BIO_ERROR;
+            bp->b_error = error;
+        }
+    } else {
+        /*
+         * If we only need to commit, try to commit
+         */
+        if (bp->b_flags & B_NEEDCOMMIT) {
+            DEBUG("write: B_NEEDCOMMIT flags set\n");
+        }
+
+        /*
+         * Setup for actual write
+         */
+        if ((off_t)bp->b_blkno * biosize + bp->b_dirtyend > fvdat->filesize)
+            bp->b_dirtyend = fvdat->filesize - (off_t)bp->b_blkno * biosize;
+
+        if (bp->b_dirtyend > bp->b_dirtyoff) {
+            io.iov_len = uiop->uio_resid = bp->b_dirtyend
+              - bp->b_dirtyoff;
+            uiop->uio_offset = (off_t)bp->b_blkno * biosize
+              + bp->b_dirtyoff;
+            io.iov_base = (char *)bp->b_data + bp->b_dirtyoff;
+            uiop->uio_rw = UIO_WRITE;
+
+            error = fuse_write_directbackend(vp, uiop, cred, fufh);
+
+            if (error == EINTR || error == ETIMEDOUT
+                || (!error && (bp->b_flags & B_NEEDCOMMIT))) {
+
+                bp->b_flags &= ~(B_INVAL|B_NOCACHE);
+                if ((bp->b_flags & B_PAGING) == 0) {
+                    bdirty(bp);
+                    bp->b_flags &= ~B_DONE;
+                }
+                if ((error == EINTR || error == ETIMEDOUT) &&
+                    (bp->b_flags & B_ASYNC) == 0)
+                    bp->b_flags |= B_EINTR;
+            } else {
+                if (error) {
+                    bp->b_ioflags |= BIO_ERROR;
+                    bp->b_flags |= B_INVAL;
+                    bp->b_error = error;
+                }
+                bp->b_dirtyoff = bp->b_dirtyend = 0;
+            }
+        } else {
+            bp->b_resid = 0;
+            bufdone(bp);
+            return (0);
+        }
+    }
+    bp->b_resid = uiop->uio_resid;
+    bufdone(bp);
+    return (error);
+}
+#else
+{
+    struct fuse_filehandle *fufh;
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_dispatcher fdi;
     struct ucred *cred; 
     int err = 0;
     int chunksize, respsize;
     caddr_t bufdat;
-    int biosize = vp->v_mount->mnt_stat.f_iosize;
+    int biosize = fuse_iosize(vp);
 
-    if (! (vp->v_type == VREG || vp->v_type == VDIR)) {
+    if (!(vp->v_type == VREG || vp->v_type == VDIR)) {
         DEBUG("for vnode #%ju v_type is %d, dropping\n",
             (uintmax_t)VTOILLU(vp), vp->v_type);
         return (EOPNOTSUPP);
@@ -621,9 +730,7 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp, struct fuse_filehandle *fufh,
             chunksize = MIN(bp->b_resid,
                 fuse_get_mpdata(vp->v_mount)->max_read);
             fdi.iosize = sizeof(*fri);
-            if (! op)
-                op = vp->v_type == VDIR ? FUSE_READDIR : FUSE_READ;
-            fdisp_make_vp(&fdi, op, vp, curthread, cred);
+            fdisp_make_vp(&fdi, FUSE_READ, vp, curthread, cred);
 
             fri = fdi.indata;
             fri->fh = fufh->fh_id;
@@ -686,8 +793,7 @@ eval:
                 fuse_get_mpdata(vp->v_mount)->max_write);
 
             fdi.iosize = sizeof(*fwi);
-            op = op ?: FUSE_WRITE;
-            fdisp_make_vp(&fdi, op, vp, NULL, cred);
+            fdisp_make_vp(&fdi, FUSE_WRITE, vp, NULL, cred);
 
             fwi = fdi.indata;
             fwi->fh = fufh->fh_id;
@@ -745,3 +851,4 @@ out:
 
     return (err);
 }	
+#endif

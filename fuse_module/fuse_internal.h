@@ -130,6 +130,13 @@ fuse_isdeadfs_fs(struct vnode *vp)
     return fuse_isdeadfs_mp(vnode_mount(vp));
 }
 
+static __inline__
+int
+fuse_iosize(struct vnode *vp)
+{
+    return vp->v_mount->mnt_stat.f_iosize;
+}
+
 /* access */
 
 #define FVP_ACCESS_NOOP   0x01

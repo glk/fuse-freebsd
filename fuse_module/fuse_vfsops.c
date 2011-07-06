@@ -241,7 +241,7 @@ fuse_vfsop_mount(struct mount *mp)
     }
 
     /* We need this here as this slot is used by getnewvnode() */
-    mp->mnt_stat.f_iosize = MAXBSIZE;
+    mp->mnt_stat.f_iosize = PAGE_SIZE;
 
     mp->mnt_data = data;
 
