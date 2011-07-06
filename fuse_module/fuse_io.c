@@ -55,9 +55,6 @@ static int fuse_write_directbackend(struct vnode *vp, struct uio *uio,
 static int fuse_write_biobackend(struct vnode *vp, struct uio *uio,
     struct ucred *cred, struct fuse_filehandle *fufh);
 
-static int fuse_std_buffeater(struct uio *uio, size_t reqsize, void *buf,
-    size_t bufsize, void *param);
-
 int
 fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
     struct ucred *cred)
@@ -196,15 +193,14 @@ fuse_read_biobackend(struct vnode *vp, struct uio *uio,
         if (n > 0) {
             DEBUG2G("feeding buffeater with %d bytes of buffer %p, saying %d was asked for\n",
                 n, bp->b_data + on, n + (int)bp->b_resid);
-            err = fuse_std_buffeater(uio, n + bp->b_resid, bp->b_data + on, n,
-                NULL);
+	    err = uiomove(bp->b_data + on, n, uio);
         }
         brelse(bp);
         DEBUG2G("end of turn, err %d, uio->uio_resid %zd, n %d\n",
             err, uio->uio_resid, n);
     } while (err == 0 && uio->uio_resid > 0 && n > 0);
 
-    return ((err == -1) ? 0 : err);
+    return (err);
 }
 
 static int
@@ -246,31 +242,17 @@ fuse_read_directbackend(struct vnode *vp, struct uio *uio,
             "resid=%zd offset=%ju\n",
             fri->size, fdi.iosize, uio->uio_resid, (uintmax_t)uio->uio_offset);
 
-        if ((err = fuse_std_buffeater(uio, fri->size, fdi.answ, fdi.iosize, NULL)))
+        if ((err = uiomove(fdi.answ, MIN(fri->size, fdi.iosize), uio)))
             break;
+	if (fdi.iosize < fri->size)
+		break;
     }
 
     fuse_ticket_drop(fdi.tick);
 
 out:
-    return ((err == -1) ? 0 : err);
+    return (err);
 }
-
-/* Simple standard way for transmitting input */
-static int
-fuse_std_buffeater(struct uio *uio, size_t reqsize, void *buf, size_t bufsize, void *param)
-{
-    int err;
-
-    if ((err = uiomove(buf, MIN(reqsize, bufsize), uio)))
-        return (err);
-
-    if (bufsize < reqsize)
-        return (-1);
-
-    return (0);
-}
-
 
 static int
 fuse_write_directbackend(struct vnode *vp, struct uio *uio,
