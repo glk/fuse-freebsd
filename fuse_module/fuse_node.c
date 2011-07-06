@@ -228,6 +228,18 @@ fuse_isvalid_attr(struct vnode *vp)
 }
 
 void
+fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred)
+{
+    struct vattr va;
+
+    if (fuse_isvalid_attr(vp))
+        return;
+
+    VOP_GETATTR(vp, &va, cred);
+    DEBUG("refreshed file size: %jd\n", VTOFUD(vp)->filesize);
+}
+
+void
 fuse_vnode_setsize(struct vnode *vp, off_t newsize)
 {
     struct fuse_vnode_data *fvdat = VTOFUD(vp);

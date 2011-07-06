@@ -1737,6 +1737,9 @@ fuse_vnop_strategy(struct vop_strategy_args *ap)
         return EIO;
     }
 
+    if (bp->b_iocmd == BIO_WRITE)
+	    fuse_vnode_refreshsize(vp, NOCRED);
+
     (void)fuse_io_strategy(vp, bp, NULL, 0);
 
     /* 
@@ -1826,6 +1829,8 @@ fuse_vnop_write(struct vop_write_args *ap)
     if (fuse_isdeadfs(vp)) {
         return EIO;
     }
+
+    fuse_vnode_refreshsize(vp, cred);
 
     return fuse_io_dispatch(vp, uio, ioflag, cred);
 }
