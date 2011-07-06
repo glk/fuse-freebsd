@@ -469,7 +469,6 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
 
     int err = 0;
     int dataflags;
-    struct timespec uptsp;
     struct fuse_dispatcher fdi;
 
     DEBUG2G("inode=%jd\n", VTOI(vp));
@@ -479,8 +478,7 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
     /* Note that we are not bailing out on a dead file system just yet. */
 
     /* look for cached attributes */
-    nanouptime(&uptsp);
-    if (fuse_timespec_cmp(&uptsp, &VTOFUD(vp)->cached_attrs_valid, <=)) {
+    if (fuse_isvalid_attr(vp)) {
         if (vap != VTOVA(vp)) {
             memcpy(vap, VTOVA(vp), sizeof(*vap));
         }

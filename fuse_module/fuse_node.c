@@ -217,6 +217,16 @@ fuse_vnode_open(struct vnode *vp, int32_t fuse_open_flags, struct thread *td)
     }
 }
 
+int
+fuse_isvalid_attr(struct vnode *vp)
+{
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    struct timespec uptsp;
+
+    nanouptime(&uptsp);
+    return fuse_timespec_cmp(&uptsp, &fvdat->cached_attrs_valid, <=);
+}
+
 void
 fuse_vnode_setsize(struct vnode *vp, off_t newsize)
 {

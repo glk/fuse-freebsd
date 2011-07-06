@@ -87,6 +87,8 @@ fuse_vnode_mmap_enable(struct vnode *vp)
     return (fuse_mmap_enable && fuse_data_cache_enable);
 }
 
+int fuse_isvalid_attr(struct vnode *vp);
+
 void fuse_vnode_destroy(struct vnode *vp);
 
 int fuse_vnode_get(struct mount         *mp,
