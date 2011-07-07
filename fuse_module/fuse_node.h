@@ -107,6 +107,6 @@ int fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize);
 
 void fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred);
 
-void fuse_vnode_setsize(struct vnode *vp, off_t newsize);
+void fuse_vnode_setsize(struct vnode *vp, struct ucred *cred, off_t newsize);
 
 #endif /* _FUSE_NODE_H_ */

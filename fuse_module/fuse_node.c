@@ -284,7 +284,7 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
 
     fuse_invalidate_attr(vp);
     if (!err) {
-        fuse_vnode_setsize(vp, newsize);
+        fuse_vnode_setsize(vp, cred, newsize);
     }
 
     return err;
@@ -303,10 +303,22 @@ fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred)
 }
 
 void
-fuse_vnode_setsize(struct vnode *vp, off_t newsize)
+fuse_vnode_setsize(struct vnode *vp, struct ucred *cred, off_t newsize)
 {
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
+    off_t oldsize;
+
+    DEBUG("inode=%jd oldsize=%jd newsize=%jd\n",
+        VTOI(vp), fvdat->filesize, newsize);
+    ASSERT_VOP_ELOCKED(vp, "fuse_vnode_setsize");
+
+    oldsize = fvdat->filesize;
+    fvdat->filesize = newsize;
+
+    if (newsize < oldsize) {
+        vtruncbuf(vp, cred, curthread, newsize, fuse_iosize(vp));
+    }
 
     vnode_pager_setsize(vp, newsize);
-    fvdat->filesize = newsize;
+    fuse_invalidate_attr(vp);
 }

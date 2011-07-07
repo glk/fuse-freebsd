@@ -522,7 +522,7 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
         off_t new_filesize = ((struct fuse_attr_out *)fdi.answ)->attr.size;
 
         if (fvdat->filesize != new_filesize) {
-            fuse_vnode_setsize(vp, new_filesize);
+            fuse_vnode_setsize(vp, cred, new_filesize);
         }
     }
 
@@ -1710,7 +1710,7 @@ out:
     fuse_ticket_drop(fdi.tick);
     if (!err && sizechanged) {
         fuse_invalidate_attr(vp);
-        fuse_vnode_setsize(vp, newsize);
+        fuse_vnode_setsize(vp, cred, newsize);
     }
 
     return err;

@@ -298,7 +298,7 @@ fuse_write_directbackend(struct vnode *vp, struct uio *uio,
         uio->uio_resid += diff;
         uio->uio_offset -= diff; 
         if (uio->uio_offset > fvdat->filesize)
-            fuse_vnode_setsize(vp, uio->uio_offset);
+            fuse_vnode_setsize(vp, cred, uio->uio_offset);
     }
 
     fuse_ticket_drop(fdi.tick);
