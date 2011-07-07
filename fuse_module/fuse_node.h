@@ -103,6 +103,8 @@ void fuse_vnode_open(struct vnode *vp,
                      int32_t fuse_open_flags,
                      struct thread *td);
 
+int fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize);
+
 void fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred);
 
 void fuse_vnode_setsize(struct vnode *vp, off_t newsize);

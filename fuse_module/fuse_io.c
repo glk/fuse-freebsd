@@ -363,7 +363,7 @@ again:
             if (bp != NULL) {
                 long save;
 
-		fuse_vnode_setsize(vp, uio->uio_offset + n);
+		fuse_vnode_extend(vp, cred, uio->uio_offset + n);
 
                 save = bp->b_flags & B_CACHE;
                 bcount += n;
@@ -385,7 +385,7 @@ again:
             DEBUG("getting block from OS, bcount %d\n", bcount);
             bp = getblk(vp, lbn, bcount, PCATCH, 0, 0);
             if (uio->uio_offset + n > fvdat->filesize) {
-                fuse_vnode_setsize(vp, uio->uio_offset + n);
+		fuse_vnode_extend(vp, cred, uio->uio_offset + n);
             }
         }
 

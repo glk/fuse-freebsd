@@ -228,6 +228,68 @@ fuse_isvalid_attr(struct vnode *vp)
     return fuse_timespec_cmp(&uptsp, &fvdat->cached_attrs_valid, <=);
 }
 
+int
+fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
+{
+    struct thread *td = curthread;
+    struct fuse_filehandle *fufh = NULL;
+    struct fuse_dispatcher  fdi;
+    struct fuse_setattr_in *fsai;
+    struct fuse_access_param facp;
+    int err = 0;
+
+    DEBUG("inode=%jd oldsize=%jd newsize=%jd\n",
+        VTOI(vp), VTOFUD(vp)->filesize, newsize);
+    ASSERT_VOP_ELOCKED(vp, "fuse_io_extend");
+    MPASS(newsize > VTOFUD(vp)->filesize);
+
+    if (fuse_isdeadfs(vp)) {
+        return EBADF;
+    }
+
+    if (vnode_vtype(vp) == VDIR) {
+        return EISDIR;
+    }
+
+    if (vfs_isrdonly(vnode_mount(vp))) {
+        return EROFS;
+    }
+
+    if (cred == NULL) {
+        cred = td->td_ucred;
+    }
+
+    fdisp_init(&fdi, sizeof(*fsai));
+    fdisp_make_vp(&fdi, FUSE_SETATTR, vp, td, cred);
+    fsai = fdi.indata;
+    fsai->valid = 0;
+
+    bzero(&facp, sizeof(facp));
+    facp.xuid = cred->cr_uid;
+    facp.xgid = cred->cr_gid;
+
+    // Truncate to a new value.
+    fsai->size = newsize;
+    fsai->valid |= FATTR_SIZE;
+
+    fuse_filehandle_getrw(vp, FUFH_WRONLY, &fufh);
+    if (fufh) {
+        fsai->fh = fufh->fh_id;
+        fsai->valid |= FATTR_FH;
+    }
+
+    err = fdisp_wait_answ(&fdi);
+
+    fuse_ticket_drop(fdi.tick);
+
+    fuse_invalidate_attr(vp);
+    if (!err) {
+        fuse_vnode_setsize(vp, newsize);
+    }
+
+    return err;
+}
+
 void
 fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred)
 {
