@@ -91,7 +91,7 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int flag,
      * we hardwire it into the file's private data (similarly to Linux,
      * btw.).
      */
-    directio = (flag & O_DIRECT);
+    directio = (flag & O_DIRECT) || !fuse_vnode_cache_enable(vp);
 
     switch (uio->uio_rw) {
     case UIO_READ:

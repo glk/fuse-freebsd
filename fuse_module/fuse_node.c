@@ -44,6 +44,14 @@ static int fuse_node_count = 0;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, node_count, CTLFLAG_RD,
             &fuse_node_count, 0, "");
 
+int fuse_data_cache_enable = 1;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, data_cache_enable, CTLFLAG_RW,
+           &fuse_data_cache_enable, 0, "");
+
+int fuse_mmap_enable = 1;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, mmap_enable, CTLFLAG_RW,
+           &fuse_mmap_enable, 0, "");
+
 static void
 fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     uint64_t nodeid, enum vtype vtyp)

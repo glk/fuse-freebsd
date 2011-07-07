@@ -1878,6 +1878,11 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 	pages = ap->a_m;
 	count = ap->a_count;
 
+	if (!fuse_vnode_mmap_enable(vp)) {
+		DEBUG("called on non-cacheable vnode??\n");
+		return (VM_PAGER_ERROR);
+	}
+
 	npages = btoc(count);
 
 	/*
@@ -2067,6 +2072,10 @@ fuse_vnop_putpages(struct vop_putpages_args *ap)
 	rtvals = ap->a_rtvals;
 	npages = btoc(count);
 	offset = IDX_TO_OFF(pages[0]->pindex);
+
+	if (!fuse_vnode_mmap_enable(vp)) {
+		DEBUG("called on non-cacheable vnode??\n");
+	}
 
 	for (i = 0; i < npages; i++)
 		rtvals[i] = VM_PAGER_AGAIN;
