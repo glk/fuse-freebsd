@@ -87,26 +87,13 @@
 
 /* misc */
 
-extern int fuse_useco;
 SYSCTL_DECL(_vfs_fuse);
 
 /* Fuse locking */
 
-#ifndef DO_GIANT_MANUALLY
-#define DO_GIANT_MANUALLY 1
-#endif
-#ifndef USE_FUSE_LOCK
-#define USE_FUSE_LOCK 1
-#endif
-
-#if USE_FUSE_LOCK
 extern struct mtx fuse_mtx;
 #define FUSE_LOCK() fuse_lck_mtx_lock(fuse_mtx)
 #define FUSE_UNLOCK() fuse_lck_mtx_unlock(fuse_mtx)
-#else
-#define FUSE_LOCK()
-#define FUSE_UNLOCK()
-#endif
 
 #define RECTIFY_TDCR(td, cred)			\
 do {						\

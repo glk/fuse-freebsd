@@ -99,10 +99,6 @@ fuse_vfsop_mount(struct mount *mp)
 
     fuse_trace_printf_vfsop();
 
-    GIANT_REQUIRED;
-    KASSERT(fuse_useco >= 0,
-        ("negative fuse usecount despite Giant"));
-
     if (mp->mnt_flag & MNT_UPDATE)
         return EOPNOTSUPP;
 
@@ -294,8 +290,6 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
     struct thread         *td = curthread;
 
     fuse_trace_printf_vfsop();
-
-    GIANT_REQUIRED;
 
     if (mntflags & MNT_FORCE) {
         flags |= FORCECLOSE;

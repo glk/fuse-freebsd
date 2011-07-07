@@ -152,7 +152,7 @@ fuse_filehandle_close(struct vnode *vp,
     }
 
 out:
-    atomic_add_acq_int(&fuse_fh_count, -1);
+    atomic_subtract_acq_int(&fuse_fh_count, 1);
     fufh->fh_id = (uint64_t)-1;
     fufh->fh_type = FUFH_INVALID;
     fuse_invalidate_attr(vp);

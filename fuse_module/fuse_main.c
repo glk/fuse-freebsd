@@ -25,10 +25,7 @@
 static void			 fuse_bringdown(eventhandler_tag eh_tag);
 static int			 fuse_loader(struct module *m, int what, void *arg);
 
-int fuse_useco = 0;
-#if USE_FUSE_LOCK
 struct mtx fuse_mtx;
-#endif
 
 
 extern void fuse_device_clone(void *arg, struct ucred *cred, char *name,
@@ -66,9 +63,7 @@ fuse_bringdown(eventhandler_tag eh_tag)
 	EVENTHANDLER_DEREGISTER(dev_clone, eh_tag);
 
 	clone_cleanup(&fuseclones);
-#if USE_FUSE_LOCK
 	mtx_destroy(&fuse_mtx);
-#endif
 }
 
 static int
@@ -77,26 +72,18 @@ fuse_loader(struct module *m, int what, void *arg)
 	static eventhandler_tag  eh_tag = NULL;
 	int err = 0;
 
-	GIANT_REQUIRED;
-
 	switch (what) {
 	case MOD_LOAD:                /* kldload */
 		fuse_pbuf_freecnt = nswbuf / 2 + 1;
 		clone_setup(&fuseclones);
-#ifdef USE_FUSE_LOCK
 		mtx_init(&fuse_mtx, "fuse_mtx", NULL, MTX_DEF);
-#endif
 		eh_tag = EVENTHANDLER_REGISTER(dev_clone, fuse_device_clone, 0,
 		                               1000);
 		if (eh_tag == NULL) {
 			clone_cleanup(&fuseclones);
-#if USE_FUSE_LOCK
 			mtx_destroy(&fuse_mtx);
-#endif
 			return (ENOMEM);
 		}
-		/* Duh, it's static... */
-		/* vfs_register(&fuse_vfsconf); */
 
 		/* vfs_modevent ignores its first arg */
 		if ((err = vfs_modevent(NULL, what, &fuse_vfsconf)))
@@ -112,27 +99,9 @@ fuse_loader(struct module *m, int what, void *arg)
 
 		break;
 	case MOD_UNLOAD:
-		KASSERT(fuse_useco >= 0,
-		        ("fuse_useco is negative: %d", fuse_useco));
-		if (fuse_useco > 0) {
-			DEBUGX(FUSE_DEBUG_INTERNAL,
-                            "fuse_useco %d\n", fuse_useco);
-		        return (EBUSY);
-		}
-
 		if ((err = vfs_modevent(NULL, what, &fuse_vfsconf)))
 			return (err);
-
-		/*
-		 * at this point the counter falls below zero thus new init
-		 * attempts will know that no brownie for them
-		 */
-		fuse_useco--;
-
 		fuse_bringdown(eh_tag);
-
-		/* vfs_unregister(&fuse_vfsconf); */
-
 		break;
 	default:
 		return (EINVAL);

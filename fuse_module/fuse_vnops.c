@@ -81,7 +81,6 @@ static vop_write_t    fuse_vnop_write;
 static vop_getpages_t fuse_vnop_getpages;
 static vop_putpages_t fuse_vnop_putpages;
 static vop_print_t    fuse_vnop_print;
-static vop_unlock_t   fuse_vnop_unlock;
 
 struct vop_vector fuse_vnops = {
 	.vop_default       = &default_vnodeops,
@@ -111,7 +110,6 @@ struct vop_vector fuse_vnops = {
 	.vop_getpages      = fuse_vnop_getpages,
 	.vop_putpages      = fuse_vnop_putpages,
 	.vop_print         = fuse_vnop_print,
-	.vop_unlock        = fuse_vnop_unlock,
 };
 
 static u_long fuse_lookup_cache_hits = 0;
@@ -164,7 +162,6 @@ fuse_vnop_access(struct vop_access_args *ap)
     struct ucred *cred    = ap->a_cred;
 
     struct fuse_access_param facp;
-    struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_data *data = fuse_get_mpdata(vnode_mount(vp));
 
     int err;
@@ -193,12 +190,6 @@ fuse_vnop_access(struct vop_access_args *ap)
     }
 
     bzero(&facp, sizeof(facp));
-
-    if (fvdat->flags & FVP_ACCESS_NOOP) {
-        fvdat->flags &= ~FVP_ACCESS_NOOP;
-    } else {
-        facp.facc_flags |= FACCESS_DO_ACCESS;
-    }   
 
     err = fuse_internal_access(vp, accmode, &facp, ap->a_td, ap->a_cred);
     DEBUG2G("err=%d accmode=0x%x\n", err, accmode);
@@ -348,9 +339,6 @@ bringup:
     }
 
     err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, VREG, /*size*/0);
-    if (!err && !gone_good_old) {
-        VTOFUD(*vpp)->flag |= FN_CREATING;
-    }
     if (err) {
        if (gone_good_old) {
            fuse_internal_forget_send(mp, td, cred, feo->nodeid, 1, fdip);
@@ -1554,24 +1542,6 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 
     DEBUG2G("inode=%jd\n", VTOI(vp));
 
-    /*
-     * XXX: Locking
-     *
-     * We need to worry about the file size changing in setattr. If the call
-     * is indeed altering the size, then:
-     *
-     * lock_exclusive(truncatelock)
-     *   lock(nodelock)
-     *     set the new size
-     *   unlock(nodelock)
-     *   adjust ubc
-     *   lock(nodelock)
-     *     do cleanup
-     *   unlock(nodelock)
-     * unlock(truncatelock)
-     * ...
-     */
-
     if (fuse_isdeadfs(vp)) {
         return EBADF;
     }
@@ -2099,29 +2069,11 @@ fuse_vnop_print(struct vop_print_args *ap)
 {
 	struct fuse_vnode_data *fvdat = VTOFUD(ap->a_vp);
 
-	printf("nodeid: %ju, parent_nid: %ju, "
-	       "nlookup: %ju, flags: %#x\n",
+	printf("nodeid: %ju, parent nodeid: %ju, "
+	       "nlookup: %ju, flag: %#x\n",
 	       VTOILLU(ap->a_vp), (uintmax_t) fvdat->parent_nid,
 	       (uintmax_t)fvdat->nlookup,
-	       fvdat->flags);
+	       fvdat->flag);
 
 	return 0;
-}
-
-/*
-    struct vnop_unlock_args {
-        struct vnode *a_vp;
-        int a_flags;
-        struct thread *a_td;
-    };
-*/
-static int
-fuse_vnop_unlock(struct vop_unlock_args *ap)
-{
-	struct vnode *vp = ap->a_vp;
-
-	if (VTOFUD(vp))
-		VTOFUD(vp)->flags &= ~FVP_ACCESS_NOOP;
-
-	return vop_stdunlock(ap);
 }

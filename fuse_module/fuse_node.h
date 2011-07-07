@@ -11,7 +11,6 @@
 
 #include "fuse_file.h"
 
-#define FN_CREATING          0x00000002
 #define FN_REVOKED           0x00000020
 #define FN_FLUSHINPROG       0x00000040
 #define FN_FLUSHWANT         0x00000080
@@ -28,32 +27,14 @@ struct fuse_vnode_data {
     struct     fuse_filehandle fufh[FUFH_MAXTYPE];
 
     /** flags **/
-    /* XXX: Clean up this multi-flag nonsense. Really. */
     uint32_t   flag;
-    int        flags;
-    uint32_t   c_flag;
 
     /** meta **/
-
     struct timespec   cached_attrs_valid;
     struct vattr      cached_attrs;
     off_t             filesize;
     uint64_t          nlookup;
     enum vtype        vtype;
-
-    /*
-     * The nodelock must be held when data in the FUSE node is accessed or
-     * modified. Typically, we would take this lock at the beginning of a
-     * vnop and drop it at the end of the vnop.
-     */
-    struct sx  nodelock;
-    void      *nodelockowner;
-
-    /*
-     * The truncatelock guards against the EOF changing on us (that is, a
-     * file resize) unexpectedly.
-     */
-    struct sx  truncatelock;
 };
 
 #define VTOFUD(vp) \

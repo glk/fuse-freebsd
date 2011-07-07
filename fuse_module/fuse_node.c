@@ -65,8 +65,6 @@ fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     }
     vp->v_type = vtyp;
     vp->v_data = fvdat;
-    sx_init(&fvdat->nodelock, "fuse node sx lock");
-    sx_init(&fvdat->truncatelock, "fuse node truncate sx lock");
 
     for (i = 0; i < FUFH_MAXTYPE; i++)
         fvdat->fufh[i].fh_type = FUFH_INVALID;
@@ -80,11 +78,9 @@ fuse_vnode_destroy(struct vnode *vp)
     struct fuse_vnode_data *fvdat = vp->v_data;
 
     vp->v_data = NULL;
-    sx_destroy(&fvdat->nodelock);
-    sx_destroy(&fvdat->truncatelock);
     free(fvdat, M_FUSEVN);
 
-    atomic_add_acq_int(&fuse_node_count, -1);
+    atomic_subtract_acq_int(&fuse_node_count, 1);
 }
 
 static int
@@ -153,7 +149,7 @@ fuse_vnode_alloc(struct mount *mp,
     if (err) {
         VOP_UNLOCK(*vpp, 0);
         fuse_vnode_destroy(*vpp);
-	*vpp = NULL;
+        *vpp = NULL;
         return (err);
     }
 
@@ -188,8 +184,8 @@ fuse_vnode_get(struct mount         *mp,
     }
 
     if (dvp != NULL && vnode_vtype(*vpp) == VDIR) {
-	    MPASS((cnp->cn_flags & ISDOTDOT) == 0);
-	    MPASS(!(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'));
+        MPASS((cnp->cn_flags & ISDOTDOT) == 0);
+        MPASS(!(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'));
 	    VTOFUD(*vpp)->parent_nid = VTOI(dvp);
     }
     if (dvp != NULL && cnp != NULL && (cnp->cn_flags & MAKEENTRY) != 0) {
@@ -235,7 +231,6 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
     struct fuse_filehandle *fufh = NULL;
     struct fuse_dispatcher  fdi;
     struct fuse_setattr_in *fsai;
-    struct fuse_access_param facp;
     int err = 0;
 
     DEBUG("inode=%jd oldsize=%jd newsize=%jd\n",
@@ -263,10 +258,6 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
     fdisp_make_vp(&fdi, FUSE_SETATTR, vp, td, cred);
     fsai = fdi.indata;
     fsai->valid = 0;
-
-    bzero(&facp, sizeof(facp));
-    facp.xuid = cred->cr_uid;
-    facp.xgid = cred->cr_gid;
 
     // Truncate to a new value.
     fsai->size = newsize;
