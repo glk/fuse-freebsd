@@ -186,7 +186,7 @@ fuse_vnode_get(struct mount         *mp,
     if (dvp != NULL && vnode_vtype(*vpp) == VDIR) {
         MPASS((cnp->cn_flags & ISDOTDOT) == 0);
         MPASS(!(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'));
-	    VTOFUD(*vpp)->parent_nid = VTOI(dvp);
+        fuse_vnode_setparent(*vpp, dvp);
     }
     if (dvp != NULL && cnp != NULL && (cnp->cn_flags & MAKEENTRY) != 0) {
         ASSERT_VOP_LOCKED(*vpp, "fuse_vnode_get");

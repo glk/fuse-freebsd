@@ -935,8 +935,7 @@ calldaemon:
                 goto out;
             }
             if (vnode_vtype(vp) == VDIR) {
-                VTOFUD(vp)->parent_nid = VTOI(dvp);
-                //SETPARENT(vp, dvp);
+                fuse_vnode_setparent(vp, dvp);
             }
             *vpp = vp;
         }
@@ -1455,6 +1454,7 @@ fuse_vnop_rename(struct vop_rename_args *ap)
     }
 
     if (tvp != NULL && tvp != fvp) {
+        fuse_vnode_setparent(tvp, tdvp);
         cache_purge(tvp);
     }
 
