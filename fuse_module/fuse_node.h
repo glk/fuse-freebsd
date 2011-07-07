@@ -13,6 +13,8 @@
 
 #define FN_CREATING          0x00000002
 #define FN_REVOKED           0x00000020
+#define FN_FLUSHINPROG       0x00000040
+#define FN_FLUSHWANT         0x00000080
 
 struct fuse_vnode_data {
     /** self **/

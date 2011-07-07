@@ -649,3 +649,63 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp)
     bufdone(bp);
     return (error);
 }
+
+/*
+ * Flush and invalidate all dirty buffers. If another process is already
+ * doing the flush, just wait for completion.
+ */
+int
+fuse_io_invalbuf(struct vnode *vp, struct thread *td)
+{
+	struct fuse_vnode_data *fvdat = VTOFUD(vp);
+	int error = 0;
+
+	if (vp->v_iflag & VI_DOOMED)
+		return 0;
+
+	ASSERT_VOP_ELOCKED(vp, "fuse_io_invalbuf");
+
+	while (fvdat->flag & FN_FLUSHINPROG) {
+		struct proc *p = td->td_proc;
+		if (vp->v_mount->mnt_kern_flag & MNTK_UNMOUNTF)
+			return EIO;
+		fvdat->flag |= FN_FLUSHWANT;
+		tsleep(&fvdat->flag, PRIBIO + 2, "fusevinv", 2 * hz);
+		error = 0;
+		if (p != NULL) {
+			PROC_LOCK(p);
+			if (SIGNOTEMPTY(p->p_siglist) ||
+			    SIGNOTEMPTY(td->td_siglist))
+			    error = EINTR;
+			PROC_UNLOCK(p);
+		}
+		if (error == EINTR)
+			return EINTR;
+	}
+	fvdat->flag |= FN_FLUSHINPROG;
+
+	if (vp->v_bufobj.bo_object != NULL) {
+		VM_OBJECT_LOCK(vp->v_bufobj.bo_object);
+		vm_object_page_clean(vp->v_bufobj.bo_object, 0, 0, OBJPC_SYNC);
+		VM_OBJECT_UNLOCK(vp->v_bufobj.bo_object);
+	}
+
+	error = vinvalbuf(vp, V_SAVE, PCATCH, 0);
+	while (error) {
+		if (error == ERESTART || error == EINTR) {
+			fvdat->flag &= ~FN_FLUSHINPROG;
+			if (fvdat->flag & FN_FLUSHWANT) {
+				fvdat->flag &= ~FN_FLUSHWANT;
+				wakeup(&fvdat->flag);
+			}
+			return EINTR;
+		}
+		error = vinvalbuf(vp, V_SAVE, PCATCH, 0);
+	}
+	fvdat->flag &= ~FN_FLUSHINPROG;
+	if (fvdat->flag & FN_FLUSHWANT) {
+		fvdat->flag &= ~FN_FLUSHWANT;
+		wakeup(&fvdat->flag);
+	}
+	return (error);
+}
