@@ -21,7 +21,8 @@ SRCS=	fuse.h		\
 	vnode_if.h
 
 CFLAGS+= -I../include
-DEBUG_FLAGS+= -g -DFUSE_DEBUG_VNOPS=1
+DEBUG_FLAGS+= -g
+# -DFUSE_DEBUG_VNOPS=1
 
 .if defined(KERNCONF)
 KERNCONF1!= echo ${KERNCONF} | sed -e 's/ .*//g'
