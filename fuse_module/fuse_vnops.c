@@ -528,25 +528,7 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
 
     fuse_ticket_drop(fdi.tick);
 
-    if (vnode_vtype(vp) != vap->va_type) {
-        if ((vnode_vtype(vp) == VNON) && (vap->va_type != VNON)) {
-            /*
-             * We should be doing the following:
-             *
-             * vp->vtype = vap->v_type
-             */
-        } else {
-            /*
-             * STALE vnode, ditch
-             *
-             * The vnode has changed its type "behind our back". There's
-             * nothing really we can do, so let us just force an internal
-             * revocation.
-             */
-            fuse_internal_vnode_disappear(vp);
-            return EIO;
-        }
-    }
+    KASSERT(vnode_vtype(vp) == vap->va_type, ("stale vnode"));
 
     debug_printf("fuse_getattr e: returning 0\n");
 
