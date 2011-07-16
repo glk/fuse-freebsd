@@ -137,6 +137,11 @@ fuse_read_biobackend(struct vnode *vp, struct uio *uio,
     filesize = VTOFUD(vp)->filesize;
 
     do {
+        if (fuse_isdeadfs(vp)) {
+            err = EIO;
+            break;
+        }
+
         lbn = uio->uio_offset / biosize;
         on = uio->uio_offset & (biosize - 1);
 
@@ -337,6 +342,11 @@ fuse_write_biobackend(struct vnode *vp, struct uio *uio,
      * no point optimizing for something that really won't ever happen.
      */
     do {
+        if (fuse_isdeadfs(vp)) {
+            err = EIO;
+            break;
+        }
+
         lbn = uio->uio_offset / biosize;
         on = uio->uio_offset & (biosize-1);
         n = MIN((unsigned)(biosize - on), uio->uio_resid);
@@ -363,7 +373,11 @@ again:
             if (bp != NULL) {
                 long save;
 
-		fuse_vnode_extend(vp, cred, uio->uio_offset + n);
+                err = fuse_vnode_extend(vp, cred, uio->uio_offset + n);
+                if (err) {
+                    brelse(bp);
+                    break;
+                }
 
                 save = bp->b_flags & B_CACHE;
                 bcount += n;
@@ -384,8 +398,12 @@ again:
             }
             DEBUG("getting block from OS, bcount %d\n", bcount);
             bp = getblk(vp, lbn, bcount, PCATCH, 0, 0);
-            if (uio->uio_offset + n > fvdat->filesize) {
-		fuse_vnode_extend(vp, cred, uio->uio_offset + n);
+            if (bp && uio->uio_offset + n > fvdat->filesize) {
+                err = fuse_vnode_extend(vp, cred, uio->uio_offset + n);
+                if (err) {
+                    brelse(bp);
+                    break;
+                }
             }
         }
 
