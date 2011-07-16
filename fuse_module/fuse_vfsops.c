@@ -323,9 +323,7 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
     fdisp_make(&fdi, FUSE_DESTROY, mp, 0, td, NULL);
 
     err = fdisp_wait_answ(&fdi);
-    if (!err) {
-        fuse_ticket_drop(fdi.tick);
-    }
+    fdisp_destroy(&fdi);
 
     fdata_set_dead(data);
 
@@ -400,7 +398,11 @@ fuse_vfsop_statfs(struct mount *mp, struct statfs *sbp)
     if (!(data->dataflags & FSESS_INITED))
         goto fake;
 
-    if ((err = fdisp_simple_vfs_statfs(&fdi, mp))) {
+    fdisp_init(&fdi, 0);
+    fdisp_make(&fdi, FUSE_STATFS, mp, FUSE_ROOT_ID, NULL, NULL);
+    err = fdisp_wait_answ(&fdi);
+    if (err) {
+        fdisp_destroy(&fdi);
         if (err == ENOTCONN) {
             /*
              * We want to seem a legitimate fs even if the daemon
@@ -428,9 +430,9 @@ fuse_vfsop_statfs(struct mount *mp, struct statfs *sbp)
         (unsigned long long)fsfo->st.bavail, (unsigned long long)fsfo->st.files,
         (unsigned long long)fsfo->st.ffree, fsfo->st.bsize, fsfo->st.namelen);
 
-    fuse_ticket_drop(fdi.tick);
-
+    fdisp_destroy(&fdi);
     return 0;
+
 fake:
     sbp->f_blocks  = 0;
     sbp->f_bfree   = 0;

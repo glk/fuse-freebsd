@@ -90,6 +90,7 @@ fiov_teardown(struct fuse_iov *fiov)
 {
     debug_printf("fiov=%p\n", fiov);
 
+    MPASS(fiov->base != NULL);
     free(fiov->base, M_FUSEMSG);
 }
 
@@ -179,11 +180,8 @@ fticket_destroy(struct fuse_ticket *ftick)
 {
     debug_printf("ftick=%p\n", ftick);
 
-    KASSERT(ftick->tk_ms_link.stqe_next == NULL,
-        ("FUSE: destroying ticket still on message list %p", ftick));
-    KASSERT(ftick->tk_aw_link.tqe_next == NULL &&
-        ftick->tk_aw_link.tqe_prev == NULL,
-        ("FUSE: destroying ticket still on answer delivery list %p", ftick));
+    FUSE_ASSERT_MS_DONE(ftick);
+    FUSE_ASSERT_AW_DONE(ftick);
 
     fiov_teardown(&ftick->tk_ms_fiov);
 
@@ -391,9 +389,8 @@ fuse_ticket_drop(struct fuse_ticket *ftick)
 {
     int die;
 
-    debug_printf("ftick=%p\n", ftick);
-
     die = refcount_release(&ftick->tk_refcount);
+    debug_printf("ftick=%p refcount=%d\n", ftick, ftick->tk_refcount);
     if (die)
         fticket_destroy(ftick);
 
@@ -403,7 +400,7 @@ fuse_ticket_drop(struct fuse_ticket *ftick)
 void
 fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t *handler)
 {
-    debug_printf("ftick=%p, handler=%p\n", ftick, handler);
+    debug_printf("ftick=%p, handler=%p data=%p\n", ftick, ftick->tk_data, handler);
 
     if (fdata_get_dead(ftick->tk_data)) {
         return;
@@ -639,7 +636,6 @@ static int
 fuse_standard_handler(struct fuse_ticket *ftick, struct uio *uio)
 {
     int err = 0;
-    int dropflag = 0;
 
     debug_printf("ftick=%p, uio=%p\n", ftick, uio);
 
@@ -647,23 +643,13 @@ fuse_standard_handler(struct fuse_ticket *ftick, struct uio *uio)
 
     fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 
-    if (fticket_answered(ftick)) {
-        /* The requester was interrupted and she set the "answered" flag
-         * to notify us. In this case, we don't have to care about
-         * anything, just drop the ticket and get out as fast as we can.
-         */
-        dropflag = 1;
-    } else {
+    if (!fticket_answered(ftick)) {
         fticket_set_answered(ftick);
         ftick->tk_aw_errno = err;
         wakeup(ftick);
     }
 
     fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
-
-    if (dropflag) {
-        fuse_ticket_drop(ftick);
-    }
 
     return err;
 }
@@ -685,10 +671,6 @@ fdisp_make_pid(struct fuse_dispatcher *fdip,
         fticket_refresh(fdip->tick);
     } else {
         fdip->tick = fuse_ticket_fetch(data);
-    }
-
-    if (fdip->tick == 0) {
-        panic("fuse_ticket_fetch() failed");
     }
 
     FUSE_DIMALLOC(&fdip->tick->tk_ms_fiov, fdip->finh,
@@ -794,7 +776,6 @@ fdisp_wait_answ(struct fuse_dispatcher *fdip)
 
 out:
     debug_printf("IPC: dropping ticket, err = %d\n", err);
-    fuse_ticket_drop(fdip->tick);
 
     return err;
 }

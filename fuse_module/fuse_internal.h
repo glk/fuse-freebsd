@@ -220,8 +220,7 @@ int
 fuse_internal_fsync(struct vnode           *vp,
                     struct thread          *td,
                     struct ucred           *cred,
-                    struct fuse_filehandle *fufh,
-                    void                   *param);
+                    struct fuse_filehandle *fufh);
 
 int
 fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio);
@@ -332,8 +331,7 @@ fuse_internal_forget_send(struct mount *mp,
                           struct thread *td,
                           struct ucred *cred,
                           uint64_t nodeid,
-                          uint64_t nlookup,
-                          struct fuse_dispatcher *fdip);
+                          uint64_t nlookup);
 
 /* fuse start/stop */
 

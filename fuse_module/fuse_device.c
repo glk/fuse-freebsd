@@ -134,6 +134,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 			wakeup(tick);
 			fuse_lck_mtx_unlock(tick->tk_aw_mtx);
 			fuse_lck_mtx_unlock(data->aw_mtx);
+			FUSE_ASSERT_AW_DONE(tick);
 			fuse_ticket_drop(tick);
 			fuse_lck_mtx_lock(data->aw_mtx);
 		}
@@ -204,7 +205,7 @@ again:
 		return (ENODEV);
 	}
 
-	if ( ! (tick = fuse_ms_pop(data))) {
+	if (!(tick = fuse_ms_pop(data))) {
 		/* check if we may block */
 		if (ioflag & O_NONBLOCK) {
 			/* get outa here soon */
@@ -220,7 +221,7 @@ again:
 			tick = fuse_ms_pop(data);
 		}
 	}
-	if (! tick) {
+	if (!tick) {
 		/*
 		 * We can get here if fuse daemon suddenly terminates,
 		 * eg, by being hit by a SIGKILL
@@ -240,6 +241,7 @@ again:
 		DEBUG2G("reader is to be sacked\n");
 		if (tick) {
 			DEBUG2G("weird -- \"kick\" is set tho there is message\n");
+			FUSE_ASSERT_MS_DONE(tick);
 			fuse_ticket_drop(tick);
 		}
 		return (ENODEV); /* This should make the daemon get off of us */
@@ -287,6 +289,7 @@ again:
 			break;
 	}
 
+	FUSE_ASSERT_MS_DONE(tick);
 	fuse_ticket_drop(tick);
 
 	return (err);
@@ -388,6 +391,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 			/* pretender doesn't wanna do anything with answer */
 			DEBUG("stuff devalidated, so we drop it\n");
 		}
+		FUSE_ASSERT_AW_DONE(tick);
 		fuse_ticket_drop(tick);
 	} else {
 		/* no callback at all! */

@@ -253,7 +253,7 @@ fuse_read_directbackend(struct vnode *vp, struct uio *uio,
 		break;
     }
 
-    fuse_ticket_drop(fdi.tick);
+    fdisp_destroy(&fdi);
 
 out:
     return (err);
@@ -270,7 +270,7 @@ fuse_write_directbackend(struct vnode *vp, struct uio *uio,
     int diff;
     int err = 0;
 
-    if (! uio->uio_resid)
+    if (!uio->uio_resid)
         return (0);
 
     fdisp_init(&fdi, 0);
@@ -292,7 +292,7 @@ fuse_write_directbackend(struct vnode *vp, struct uio *uio,
             break;
 
         if ((err = fdisp_wait_answ(&fdi)))
-            return(err);
+            break;
 
         diff = chunksize - ((struct fuse_write_out *)fdi.answ)->size;
         if (diff < 0) {
@@ -306,7 +306,7 @@ fuse_write_directbackend(struct vnode *vp, struct uio *uio,
             fuse_vnode_setsize(vp, cred, uio->uio_offset);
     }
 
-    fuse_ticket_drop(fdi.tick);
+    fdisp_destroy(&fdi);
 
     return (err);
 }

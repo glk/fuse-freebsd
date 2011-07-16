@@ -30,6 +30,15 @@ do {                                                   \
 
 #define FU_AT_LEAST(siz) max((siz), 160)
 
+#define FUSE_ASSERT_AW_DONE(ftick)                                      \
+    KASSERT((ftick)->tk_aw_link.tqe_next == NULL &&                     \
+        (ftick)->tk_aw_link.tqe_prev == NULL,                           \
+        ("FUSE: ticket still on answer delivery list %p", (ftick)))     \
+
+#define FUSE_ASSERT_MS_DONE(ftick)                                      \
+    KASSERT((ftick)->tk_ms_link.stqe_next == NULL,                      \
+        ("FUSE: ticket still on message list %p", (ftick)))
+
 struct fuse_ticket;
 struct fuse_data;
 
@@ -71,7 +80,6 @@ static __inline__
 struct fuse_iov *
 fticket_resp(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
     return (&ftick->tk_aw_fiov);
 }
 
@@ -181,7 +189,6 @@ struct fuse_data *
 fuse_get_mpdata(struct mount *mp)
 {
     struct fuse_data *data = mp->mnt_data;
-    DEBUGX(FUSE_DEBUG_IPC, "-> mp=%p\n", mp);
     return (data->mpri == FM_PRIMARY ? data : NULL);
 }
 
@@ -189,7 +196,8 @@ static __inline__
 void
 fuse_ms_push(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    DEBUGX(FUSE_DEBUG_IPC, "ftick=%p refcount=%d\n",
+        ftick, ftick->tk_refcount + 1);
     mtx_assert(&ftick->tk_data->ms_mtx, MA_OWNED);
     refcount_acquire(&ftick->tk_refcount);
     STAILQ_INSERT_TAIL(&ftick->tk_data->ms_head, ftick, tk_ms_link);
@@ -201,7 +209,6 @@ fuse_ms_pop(struct fuse_data *data)
 {
     struct fuse_ticket *ftick = NULL;
 
-    DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
     mtx_assert(&data->ms_mtx, MA_OWNED);
 
     if ((ftick = STAILQ_FIRST(&data->ms_head))) {
@@ -210,6 +217,8 @@ fuse_ms_pop(struct fuse_data *data)
         ftick->tk_ms_link.stqe_next = NULL;
 #endif
     }
+    DEBUGX(FUSE_DEBUG_IPC, "ftick=%p refcount=%d\n",
+        ftick, ftick ? ftick->tk_refcount : -1);
 
     return ftick;
 }
@@ -218,7 +227,8 @@ static __inline__
 void
 fuse_aw_push(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    DEBUGX(FUSE_DEBUG_IPC, "ftick=%p refcount=%d\n",
+        ftick, ftick->tk_refcount + 1);
     mtx_assert(&ftick->tk_data->aw_mtx, MA_OWNED);
     refcount_acquire(&ftick->tk_refcount);
     TAILQ_INSERT_TAIL(&ftick->tk_data->aw_head, ftick, tk_aw_link);
@@ -228,7 +238,8 @@ static __inline__
 void
 fuse_aw_remove(struct fuse_ticket *ftick)
 {
-    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    DEBUGX(FUSE_DEBUG_IPC, "ftick=%p refcount=%d\n",
+        ftick, ftick->tk_refcount);
     TAILQ_REMOVE(&ftick->tk_data->aw_head, ftick, tk_aw_link);
 #ifdef INVARIANTS
     ftick->tk_aw_link.tqe_next = NULL;
@@ -242,12 +253,13 @@ fuse_aw_pop(struct fuse_data *data)
 {
     struct fuse_ticket *ftick = NULL;
 
-    DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
     mtx_assert(&ftick->tk_data->aw_mtx, MA_OWNED);
 
     if ((ftick = TAILQ_FIRST(&data->aw_head))) {
         fuse_aw_remove(ftick);
     }
+    DEBUGX(FUSE_DEBUG_IPC, "ftick=%p refcount=%d\n",
+        ftick, ftick ? ftick->tk_refcount : -1);
 
     return ftick;
 }
@@ -297,6 +309,16 @@ fdisp_init(struct fuse_dispatcher *fdisp, size_t iosize)
     fdisp->tick = NULL;
 }
 
+static __inline__
+void
+fdisp_destroy(struct fuse_dispatcher *fdisp)
+{
+    DEBUGX(FUSE_DEBUG_IPC, "-> fdisp=%p, ftick=%p\n", fdisp, fdisp->tick);
+    fuse_ticket_drop(fdisp->tick);
+#ifdef INVARIANTS
+    fdisp->tick = NULL;
+#endif
+}
 
 void fdisp_make(struct fuse_dispatcher *fdip, enum fuse_opcode op,
                 struct mount *mp, uint64_t nid, struct thread *td,
@@ -317,19 +339,8 @@ fdisp_simple_putget_vp(struct fuse_dispatcher *fdip, enum fuse_opcode op,
                     struct vnode *vp, struct thread *td, struct ucred *cred)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> fdip=%p, opcode=%d, vp=%p\n", fdip, op, vp);
-    fdisp_init(fdip, 0);
     fdisp_make_vp(fdip, op, vp, td, cred);
     return fdisp_wait_answ(fdip);
-}
-
-static __inline__
-int
-fdisp_simple_vfs_statfs(struct fuse_dispatcher *fdip,
-                         struct mount           *mp)
-{
-   fdisp_init(fdip, 0);
-   fdisp_make(fdip, FUSE_STATFS, mp, FUSE_ROOT_ID, NULL, NULL);
-   return fdisp_wait_answ(fdip);
 }
 
 #endif /* _FUSE_IPC_H_ */

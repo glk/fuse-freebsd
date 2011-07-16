@@ -144,9 +144,8 @@ fuse_internal_access(struct vnode *vp,
     fai->mask = F_OK;
     fai->mask |= mask;
 
-    if (!(err = fdisp_wait_answ(&fdi))) {
-        fuse_ticket_drop(fdi.tick);
-    }
+    err = fdisp_wait_answ(&fdi);
+    fdisp_destroy(&fdi);
 
     if (err == ENOSYS) {
         fuse_get_mpdata(mp)->dataflags |= FSESS_NOACCESS;
@@ -168,8 +167,6 @@ fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio)
                                         FSESS_NOFSYNC : FSESS_NOFSYNCDIR;
     }
 
-    fuse_ticket_drop(tick);
-
     return 0;
 }
 
@@ -177,29 +174,29 @@ int
 fuse_internal_fsync(struct vnode           *vp,
                     struct thread          *td,
                     struct ucred           *cred,
-                    struct fuse_filehandle *fufh,
-                    void                   *param)
+                    struct fuse_filehandle *fufh)
 {
     int op = FUSE_FSYNC;
     struct fuse_fsync_in *ffsi;
-    struct fuse_dispatcher *fdip = param;
+    struct fuse_dispatcher fdi;
 
     fuse_trace_printf_func();
 
-    fdip->iosize = sizeof(*ffsi);
-    fdip->tick = NULL;
     if (vnode_isdir(vp)) {
         op = FUSE_FSYNCDIR;
     }
     
-    fdisp_make_vp(fdip, op, vp, td, cred);
-    ffsi = fdip->indata;
+    fdisp_init(&fdi, sizeof(*ffsi));
+    fdisp_make_vp(&fdi, op, vp, td, cred);
+    ffsi = fdi.indata;
     ffsi->fh = fufh->fh_id;
 
     ffsi->fsync_flags = 1; /* datasync */
   
-    fuse_insert_callback(fdip->tick, fuse_internal_fsync_callback);
-    fuse_insert_message(fdip->tick);
+    fuse_insert_callback(fdi.tick, fuse_internal_fsync_callback);
+    fuse_insert_message(fdi.tick);
+
+    fdisp_destroy(&fdi);
 
     return 0;
 
@@ -236,7 +233,7 @@ fuse_internal_readdir(struct vnode           *vp,
         fri->size = min(uio_resid(uio), FUSE_DEFAULT_IOSIZE); // mp->max_read
 
         if ((err = fdisp_wait_answ(&fdi))) {
-            goto out;
+            break;
         }
 
         if ((err = fuse_internal_readdir_processdata(uio, fri->size, fdi.answ,
@@ -245,9 +242,7 @@ fuse_internal_readdir(struct vnode           *vp,
         }
     }
 
-    fuse_ticket_drop(fdi.tick);
-
-out:
+    fdisp_destroy(&fdi);
     return ((err == -1) ? 0 : err);
 }
 
@@ -385,9 +380,8 @@ fuse_internal_remove(struct vnode *dvp,
     }
 #endif
 
-    if (!(err = fdisp_wait_answ(&fdi))) {
-        fuse_ticket_drop(fdi.tick);
-    }
+    err = fdisp_wait_answ(&fdi);
+    fdisp_destroy(&fdi);
 
     fuse_invalidate_attr(dvp);
     fuse_invalidate_attr(vp);
@@ -437,9 +431,8 @@ fuse_internal_rename(struct vnode *fdvp,
     ((char *)fdi.indata)[sizeof(*fri) + fcnp->cn_namelen +
                          tcnp->cn_namelen + 1] = '\0';
         
-    if (!(err = fdisp_wait_answ(&fdi))) {
-        fuse_ticket_drop(fdi.tick);
-    }
+    err = fdisp_wait_answ(&fdi);
+    fdisp_destroy(&fdi);
 
     fuse_invalidate_attr(fdvp);
     if (tdvp != fdvp) {
@@ -490,19 +483,17 @@ fuse_internal_newentry_core(struct vnode *dvp,
     feo = fdip->answ;
 
     if ((err = fuse_internal_checkentry(feo, vtyp))) {
-        goto out;
+        return err;
     }
 
     err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, vtyp, 0);
     if (err) {
-        fuse_internal_forget_send(mp, cnp->cn_thread, cnp->cn_cred, feo->nodeid, 1, fdip);
+        fuse_internal_forget_send(mp, cnp->cn_thread, cnp->cn_cred,
+            feo->nodeid, 1);
         return err;
     }
 
     cache_attrs(*vpp, feo);
-
-out:
-    fuse_ticket_drop(fdip->tick);
 
     return err;
 }
@@ -524,6 +515,7 @@ fuse_internal_newentry(struct vnode *dvp,
     fuse_internal_newentry_makerequest(mp, VTOI(dvp), cnp, op, buf,
 	                               bufsize, &fdi);
     err = fuse_internal_newentry_core(dvp, vpp, cnp, vtype, &fdi);
+    fdisp_destroy(&fdi);
     fuse_invalidate_attr(dvp);
 
     return err;
@@ -534,12 +526,8 @@ fuse_internal_newentry(struct vnode *dvp,
 int
 fuse_internal_forget_callback(struct fuse_ticket *ftick, struct uio *uio)
 {
-    struct fuse_dispatcher fdi;
-
-    fdi.tick = ftick;
-
     fuse_internal_forget_send(ftick->tk_data->mp, curthread, NULL,
-        ((struct fuse_in_header *)ftick->tk_ms_fiov.base)->nodeid, 1, &fdi);
+        ((struct fuse_in_header *)ftick->tk_ms_fiov.base)->nodeid, 1);
 
     return 0;
 }
@@ -549,27 +537,29 @@ fuse_internal_forget_send(struct mount *mp,
                           struct thread *td,
                           struct ucred *cred,
                           uint64_t nodeid,
-                          uint64_t nlookup,
-                          struct fuse_dispatcher *fdip)
+                          uint64_t nlookup)
 {
+
+    struct fuse_dispatcher fdi;
     struct fuse_forget_in *ffi;
 
-    debug_printf("mp=%p, nodeid=%jd, nlookup=%jd, fdip=%p\n",
-                 mp, (uintmax_t)nodeid, (uintmax_t)nlookup, fdip);
+    debug_printf("mp=%p, nodeid=%jd, nlookup=%jd\n",
+                 mp, (uintmax_t)nodeid, (uintmax_t)nlookup);
 
     /*
      * KASSERT(nlookup > 0, ("zero-times forget for vp #%llu",
      *         (long long unsigned) nodeid));
      */
 
-    fdisp_init(fdip, sizeof(*ffi));
-    fdisp_make(fdip, FUSE_FORGET, mp, nodeid, td, cred);
+    fdisp_init(&fdi, sizeof(*ffi));
+    fdisp_make(&fdi, FUSE_FORGET, mp, nodeid, td, cred);
 
-    ffi = fdip->indata;
+    ffi = fdi.indata;
     ffi->nlookup = nlookup;
 
-    fticket_invalidate(fdip->tick);
-    fuse_insert_message(fdip->tick);
+    fticket_invalidate(fdi.tick);
+    fuse_insert_message(fdi.tick);
+    fdisp_destroy(&fdi);
 }
 
 void
@@ -623,8 +613,6 @@ fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
     }
 
 out:
-    fuse_ticket_drop(tick);
-
     if (err) {
         fdata_set_dead(data);
     }
@@ -653,6 +641,7 @@ fuse_internal_send_init(struct fuse_data *data, struct thread *td)
 
     fuse_insert_callback(fdi.tick, fuse_internal_init_callback);
     fuse_insert_message(fdi.tick);
+    fdisp_destroy(&fdi);
 }
 
 #ifdef ZERO_PAD_INCOMPLETE_BUFS

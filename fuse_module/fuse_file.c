@@ -86,7 +86,7 @@ fuse_filehandle_open(struct vnode *vp,
         if (err == ENOENT) {
             fuse_internal_vnode_disappear(vp);
         }
-        return err;
+        goto out;
     }
 
     foo = fdi.answ;
@@ -94,9 +94,9 @@ fuse_filehandle_open(struct vnode *vp,
     fuse_filehandle_init(vp, fufh_type, fufhp, foo->fh);
     fuse_vnode_open(vp, foo->open_flags, td);
     
-    fuse_ticket_drop(fdi.tick);
-
-    return 0;
+out:
+    fdisp_destroy(&fdi);
+    return err;
 }
 
 int
@@ -141,15 +141,12 @@ fuse_filehandle_close(struct vnode *vp,
     fri->flags = fuse_filehandle_xlate_to_oflags(fufh_type);
 
     if (waitfor == FUSE_OP_FOREGROUNDED) {
-        if ((err = fdisp_wait_answ(&fdi))) {
-            goto out;
-        } else {
-            fuse_ticket_drop(fdi.tick);
-        }
+        err = fdisp_wait_answ(&fdi);
     } else {
         fuse_insert_callback(fdi.tick, NULL);
         fuse_insert_message(fdi.tick);
     }
+    fdisp_destroy(&fdi);
 
 out:
     atomic_subtract_acq_int(&fuse_fh_count, 1);

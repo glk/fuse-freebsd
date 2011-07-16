@@ -309,11 +309,11 @@ fuse_vnop_create(struct vop_create_args *ap)
     if (err == ENOSYS) {
         debug_printf("create: got ENOSYS from daemon\n");
         fuse_get_mpdata(vnode_mount(dvp))->dataflags |= FSESS_NOCREATE;
-        fdip->tick = NULL;
+        fdisp_destroy(fdip);
         goto good_old;
     } else if (err) {
         debug_printf("create: darn, got err=%d from daemon\n", err);
-        goto undo;
+        goto out;
     }
 
     goto bringup;
@@ -322,26 +322,26 @@ good_old:
     gone_good_old = 1;
     fmni.mode = mode; /* fvdat->flags; */
     fmni.rdev = 0;
+    fdisp_init(&fdi, 0);
     fuse_internal_newentry_makerequest(vnode_mount(dvp), parentnid, cnp,
                                        FUSE_MKNOD, &fmni, sizeof(fmni),
                                        fdip);
     err = fdisp_wait_answ(fdip);
     if (err) {
-        goto undo;
+        goto out;
     }
 
 bringup:
     feo = fdip->answ;
 
     if ((err = fuse_internal_checkentry(feo, VREG))) {
-        fuse_ticket_drop(fdip->tick);
-        goto undo;
+        goto out;
     }
 
     err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, VREG, /*size*/0);
     if (err) {
        if (gone_good_old) {
-           fuse_internal_forget_send(mp, td, cred, feo->nodeid, 1, fdip);
+           fuse_internal_forget_send(mp, td, cred, feo->nodeid, 1);
        } else {
            struct fuse_release_in *fri;
            uint64_t nodeid = feo->nodeid;
@@ -372,11 +372,8 @@ bringup:
 
     cache_purge_negative(dvp);
 
-    fuse_ticket_drop(fdip->tick);
-
-    return 0;
-
-undo:
+out:
+    fdisp_destroy(fdip);
     return err;
 }
 
@@ -407,7 +404,6 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
     struct vnode *vp      = ap->a_vp;
     struct thread *td     = ap->a_td;
 
-    struct fuse_dispatcher fdi;
     struct fuse_filehandle *fufh;
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
 
@@ -427,11 +423,10 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
         goto out;
     }
 
-    fdisp_init(&fdi, 0);
     for (type = 0; type < FUFH_MAXTYPE; type++) {
         fufh = &(fvdat->fufh[type]);
         if (FUFH_IS_VALID(fufh)) {
-            fuse_internal_fsync(vp, td, NULL, fufh, &fdi);
+            fuse_internal_fsync(vp, td, NULL, fufh);
         }
     }
 
@@ -485,15 +480,17 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
         }
     }
 
+    fdisp_init(&fdi, 0);
     if ((err = fdisp_simple_putget_vp(&fdi, FUSE_GETATTR, vp, td, cred))) {
         if ((err == ENOTCONN) && vnode_isvroot(vp)) {
             /* see comment at similar place in fuse_statfs() */
+            fdisp_destroy(&fdi);
             goto fake;
         }
         if (err == ENOENT) {
             fuse_internal_vnode_disappear(vp);
         }
-        return err;
+        goto out;
     }
 
     cache_attrs(vp, (struct fuse_attr_out *)fdi.answ);
@@ -514,13 +511,12 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
         }
     }
 
-    fuse_ticket_drop(fdi.tick);
-
     KASSERT(vnode_vtype(vp) == vap->va_type, ("stale vnode"));
-
     debug_printf("fuse_getattr e: returning 0\n");
 
-    return 0;
+out:
+    fdisp_destroy(&fdi);
+    return err;
 
 fake:
     bzero(vap, sizeof(*vap));
@@ -609,13 +605,12 @@ fuse_vnop_link(struct vop_link_args *ap)
     fuse_internal_newentry_makerequest(vnode_mount(tdvp), VTOI(tdvp), cnp,
                                        FUSE_LINK, &fli, sizeof(fli), &fdi);
     if ((err = fdisp_wait_answ(&fdi))) {
-        return err;
+        goto out;
     }
 
     feo = fdi.answ;
 
     err = fuse_internal_checkentry(feo, vnode_vtype(vp));
-    fuse_ticket_drop(fdi.tick);
     fuse_invalidate_attr(tdvp);
     fuse_invalidate_attr(vp);
 
@@ -623,6 +618,8 @@ fuse_vnop_link(struct vop_link_args *ap)
         VTOFUD(vp)->nlookup++;
     }
 
+out:
+    fdisp_destroy(&fdi);
     return err;
 }
 
@@ -753,6 +750,7 @@ calldaemon:
 
     if (lookup_err &&
         (!fdi.answ_stat || lookup_err != ENOENT || op != FUSE_LOOKUP)) {
+        fdisp_destroy(&fdi);
         return lookup_err;
     }
 
@@ -983,8 +981,9 @@ out:
         if (err) { /* Found inode; exit with no vnode. */
             if (op == FUSE_LOOKUP) {
                 fuse_internal_forget_send(vnode_mount(dvp), td, cred,
-                                          nid, 1, &fdi);
+                                          nid, 1);
             }
+            fdisp_destroy(&fdi);
             return err;
         } else {
 #ifndef NO_EARLY_PERM_CHECK_HACK
@@ -1040,9 +1039,8 @@ out:
             }
 #endif
         }
-            
-        fuse_ticket_drop(fdi.tick);
     }
+    fdisp_destroy(&fdi);
 
     return err;
 }
@@ -1292,8 +1290,10 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
         return EINVAL;
     }
 
-    if ((err = fdisp_simple_putget_vp(&fdi, FUSE_READLINK, vp, curthread, cred))) {
-        return err;
+    fdisp_init(&fdi, 0);
+    err = fdisp_simple_putget_vp(&fdi, FUSE_READLINK, vp, curthread, cred);
+    if (err) {
+        goto out;
     }
 
     if (((char *)fdi.answ)[0] == '/' &&
@@ -1306,9 +1306,10 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
         err = uiomove(fdi.answ, fdi.iosize, uio);
     }
 
-    fuse_ticket_drop(fdi.tick);
     fuse_invalidate_attr(vp);
 
+out:
+    fdisp_destroy(&fdi);
     return err;
 }
 
@@ -1345,10 +1346,8 @@ fuse_vnop_reclaim(struct vop_reclaim_args *ap)
     }
 
     if ((!fuse_isdeadfs(vp)) && (fvdat->nlookup)) {
-        struct fuse_dispatcher fdi;
-        fdi.tick = NULL;
         fuse_internal_forget_send(vnode_mount(vp), td, NULL, VTOI(vp),
-                                  fvdat->nlookup, &fdi);
+                                  fvdat->nlookup);
     }
 
     cache_purge(vp);
@@ -1637,7 +1636,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 
     if ((err = fdisp_wait_answ(&fdi))) {
         fuse_invalidate_attr(vp);
-        return err;
+        goto out;
     }
 
     vtyp = IFTOVT(((struct fuse_attr_out *)fdi.answ)->attr.mode);
@@ -1663,7 +1662,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
     }
 
 out:
-    fuse_ticket_drop(fdi.tick);
+    fdisp_destroy(&fdi);
     if (!err && sizechanged) {
         fuse_invalidate_attr(vp);
         fuse_vnode_setsize(vp, cred, newsize);
@@ -1756,6 +1755,7 @@ fuse_vnop_symlink(struct vop_symlink_args *ap)
     memcpy((char *)fdi.indata + cnp->cn_namelen + 1, target, len);
 
     err = fuse_internal_newentry_core(dvp, vpp, cnp, VLNK, &fdi);
+    fdisp_destroy(&fdi);
 
     if (err == 0) {
         fuse_invalidate_attr(dvp);

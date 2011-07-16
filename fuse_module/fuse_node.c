@@ -270,8 +270,7 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
     }
 
     err = fdisp_wait_answ(&fdi);
-
-    fuse_ticket_drop(fdi.tick);
+    fdisp_destroy(&fdi);
 
     fuse_invalidate_attr(vp);
     if (!err) {
