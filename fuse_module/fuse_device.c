@@ -395,9 +395,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 	} else {
 		/* no callback at all! */
 		DEBUG("erhm, no handler for this response\n");
-
-		fdata_set_dead(data);
-		return (EINVAL);
+		err = EINVAL;
 	}
 
 	return (err);
