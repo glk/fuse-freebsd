@@ -855,11 +855,6 @@ fdisp_wait_answ(struct fuse_dispatcher *fdip)
 
     if ((err = fticket_wait_answer(fdip->tick))) { // interrupted
 
-#ifndef DONT_TRY_HARD_PREVENT_IO_IN_VAIN
-        struct fuse_ticket *tick;
-        unsigned            age;
-#endif
-
         debug_printf("IPC: interrupted, err = %d\n", err);
 
         fuse_lck_mtx_lock(fdip->tick->tk_aw_mtx);
@@ -880,31 +875,8 @@ fdisp_wait_answ(struct fuse_dispatcher *fdip)
              * to drop the ticket.
              */
             debug_printf("IPC: setting to answered\n");
-            age = fdip->tick->tk_age;
             fticket_set_answered(fdip->tick);
             fuse_lck_mtx_unlock(fdip->tick->tk_aw_mtx);
-#ifndef DONT_TRY_HARD_PREVENT_IO_IN_VAIN
-            /*
-             * If we are willing to pay with one more locking, we
-             * can save on I/O by getting the device write handler
-             * to drop the ticket. That is, if we are fast enough,
-             * the standard handler -- who does the uiomove --
-             * won't even be called. (No guarantee though for
-             * being fast.)
-             */
-            fuse_lck_mtx_lock(fdip->tick->tk_data->aw_mtx);
-            TAILQ_FOREACH(tick, &fdip->tick->tk_data->aw_head, tk_aw_link) {
-                if (tick == fdip->tick) {
-                    if (fdip->tick->tk_age == age) {
-                        debug_printf("IPC: preventing io in vain succeeded\n");
-                        fdip->tick->tk_aw_handler = NULL;
-                    }
-                    break;
-                }
-            }
-
-            fuse_lck_mtx_unlock(fdip->tick->tk_data->aw_mtx);
-#endif
             return err;
         }
     }
