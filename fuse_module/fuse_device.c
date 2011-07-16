@@ -133,6 +133,9 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 			tick->tk_aw_errno = ENOTCONN;
 			wakeup(tick);
 			fuse_lck_mtx_unlock(tick->tk_aw_mtx);
+			fuse_lck_mtx_unlock(data->aw_mtx);
+			fuse_ticket_drop(tick);
+			fuse_lck_mtx_lock(data->aw_mtx);
 		}
 		fuse_lck_mtx_unlock(data->aw_mtx);
 
@@ -237,7 +240,7 @@ again:
 		DEBUG2G("reader is to be sacked\n");
 		if (tick) {
 			DEBUG2G("weird -- \"kick\" is set tho there is message\n");
-			fuse_ticket_drop_invalid(tick);
+			fuse_ticket_drop(tick);
 		}
 		return (ENODEV); /* This should make the daemon get off of us */
 	}
@@ -284,12 +287,7 @@ again:
 			break;
 	}
 
-	/*
-	 * fuse_device_read will drop "not owned" tickets
-	 * (used when the one who inserted the message thinks the daemon
-	 * won't aswer)
-	 */
-	fuse_ticket_drop_invalid(tick);
+	fuse_ticket_drop(tick);
 
 	return (err);
 }
@@ -332,7 +330,7 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 	struct fuse_ticket *tick, *x_tick;
 	int found = 0;
 
-	DEBUG("Fuse write -- resid: %zd, iovcnt: %d, thread: %d\n",
+	DEBUG("resid: %zd, iovcnt: %d, thread: %d\n",
 		uio->uio_resid, uio->uio_iovcnt, uio->uio_td->td_tid);
 
 	data = fuse_get_devdata(dev);
@@ -383,15 +381,14 @@ fuse_device_write(struct cdev *dev, struct uio *uio, int ioflag)
 			 * (Then, by all chance, she'll just get that's done
 			 * via ticket_drop(), so no manual mucking around...)
 			 */
+			DEBUG("pass ticket to a callback\n");
 			memcpy(&tick->tk_aw_ohead, &ohead, sizeof(ohead));
 			err = tick->tk_aw_handler(tick, uio);
-			DEBUG("stuff been passed over to a callback\n");
 		} else {
 			/* pretender doesn't wanna do anything with answer */
 			DEBUG("stuff devalidated, so we drop it\n");
-			fuse_ticket_drop(tick);
-			return (err);
 		}
+		fuse_ticket_drop(tick);
 	} else {
 		/* no callback at all! */
 		DEBUG("erhm, no handler for this response\n");

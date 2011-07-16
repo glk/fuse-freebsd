@@ -37,14 +37,6 @@ static void                fticket_destroy(struct fuse_ticket *ftick);
 static int                 fticket_wait_answer(struct fuse_ticket *ftick);
 static __inline__ int      fticket_aw_pull_uio(struct fuse_ticket *ftick,
                                                struct uio *uio);
-static __inline__ void     fuse_push_freeticks(struct fuse_ticket *ftick);
-
-static __inline__ struct fuse_ticket *
-fuse_pop_freeticks(struct fuse_data *data);
-
-static __inline__ void     fuse_push_allticks(struct fuse_ticket *ftick);
-static __inline__ void     fuse_remove_allticks(struct fuse_ticket *ftick);
-static struct fuse_ticket *fuse_pop_allticks(struct fuse_data *data);
 
 static int             fuse_body_audit(struct fuse_ticket *ftick, size_t blen);
 static __inline__ void fuse_setup_ihead(struct fuse_in_header *ihead,
@@ -153,6 +145,8 @@ fticket_alloc(struct fuse_data *data)
     mtx_init(&ftick->tk_aw_mtx, "fuse answer delivery mutex", NULL, MTX_DEF);
     fiov_init(&ftick->tk_aw_fiov, 0);
     ftick->tk_aw_type = FT_A_FIOV;
+
+    refcount_init(&ftick->tk_refcount, 1);
 
     return ftick;
 }
@@ -315,12 +309,9 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
     STAILQ_INIT(&data->ms_head);
     mtx_init(&data->ticket_mtx, "fuse ticketer mutex", NULL, MTX_DEF);
     debug_printf("ALLOC_INIT data=%p ticket_mtx=%p\n", data, &data->ticket_mtx);
-    STAILQ_INIT(&data->freetickets_head);
-    TAILQ_INIT(&data->alltickets_head);
     mtx_init(&data->aw_mtx, "fuse answer list mutex", NULL, MTX_DEF);
     TAILQ_INIT(&data->aw_head);
     data->ticketer = 0;
-    data->freeticket_counter = 0;
     data->daemoncred = crhold(cred);
     data->daemon_timeout = FUSE_DEFAULT_DAEMON_TIMEOUT;
 
@@ -334,8 +325,6 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
 void
 fdata_destroy(struct fuse_data *data)
 {
-    struct fuse_ticket *ftick;
-
     debug_printf("data=%p, destroy.mntco = %d\n", data, data->mntco);
 
     /* Driving off stage all that stuff thrown at device... */
@@ -345,10 +334,6 @@ fdata_destroy(struct fuse_data *data)
 #ifdef FUSE_EXPLICIT_RENAME_LOCK
     sx_destroy(&data->rename_lock);
 #endif
-
-    while ((ftick = fuse_pop_allticks(data))) {
-        fticket_destroy(ftick);
-    }
 
     crfree(data->daemoncred);
 
@@ -376,71 +361,6 @@ fdata_set_dead(struct fuse_data *data)
     fuse_lck_mtx_unlock(data->ticket_mtx);
 }
 
-static __inline__
-void
-fuse_push_freeticks(struct fuse_ticket *ftick)
-{
-    debug_printf("ftick=%p\n", ftick);
-
-    STAILQ_INSERT_TAIL(&ftick->tk_data->freetickets_head, ftick,
-                       tk_freetickets_link);
-    ftick->tk_data->freeticket_counter++;
-}
-
-static __inline__
-struct fuse_ticket *
-fuse_pop_freeticks(struct fuse_data *data)
-{
-    struct fuse_ticket *ftick;
-
-    debug_printf("data=%p\n", data);
-
-    if ((ftick = STAILQ_FIRST(&data->freetickets_head))) {
-        STAILQ_REMOVE_HEAD(&data->freetickets_head, tk_freetickets_link);
-        data->freeticket_counter--;
-    }
-
-    if (STAILQ_EMPTY(&data->freetickets_head) &&
-        (data->freeticket_counter != 0)) {
-        panic("FUSE: ticket count mismatch!");
-    }
-
-    return ftick;
-}
-
-static __inline__
-void
-fuse_push_allticks(struct fuse_ticket *ftick)
-{
-    debug_printf("ftick=%p\n", ftick);
-
-    TAILQ_INSERT_TAIL(&ftick->tk_data->alltickets_head, ftick,
-                      tk_alltickets_link);
-}
-
-static __inline__
-void
-fuse_remove_allticks(struct fuse_ticket *ftick)
-{
-    debug_printf("ftick=%p\n", ftick);
-
-    TAILQ_REMOVE(&ftick->tk_data->alltickets_head, ftick, tk_alltickets_link);
-}
-
-static struct fuse_ticket *
-fuse_pop_allticks(struct fuse_data *data)
-{
-    struct fuse_ticket *ftick;
-
-    debug_printf("data=%p\n", data);
-
-    if ((ftick = TAILQ_FIRST(&data->alltickets_head))) {
-        fuse_remove_allticks(ftick);
-    }
-
-    return ftick;
-}
-
 struct fuse_ticket *
 fuse_ticket_fetch(struct fuse_data *data)
 {
@@ -449,23 +369,8 @@ fuse_ticket_fetch(struct fuse_data *data)
 
     debug_printf("data=%p\n", data);
 
+    ftick = fticket_alloc(data);
     fuse_lck_mtx_lock(data->ticket_mtx);
-
-    if (data->freeticket_counter == 0) {
-        fuse_lck_mtx_unlock(data->ticket_mtx);
-        ftick = fticket_alloc(data);
-        if (!ftick) {
-            panic("ticket allocation failed");
-        }
-        fuse_lck_mtx_lock(data->ticket_mtx);
-        fuse_push_allticks(ftick);
-    } else {
-        /* locked here */
-        ftick = fuse_pop_freeticks(data);
-        if (!ftick) {
-            panic("no free ticket despite the counter's value");
-        }
-    }
 
     if (!(data->dataflags & FSESS_INITED) && data->ticketer > 1) {
         err = msleep(&data->ticketer, &data->ticket_mtx, PCATCH | PDROP,
@@ -481,44 +386,18 @@ fuse_ticket_fetch(struct fuse_data *data)
     return ftick;
 }
 
-void
+int
 fuse_ticket_drop(struct fuse_ticket *ftick)
 {
-    int die = 0;
+    int die;
 
     debug_printf("ftick=%p\n", ftick);
 
-    fuse_lck_mtx_lock(ftick->tk_data->ticket_mtx);
-
-    if (fuse_max_freetickets >= 0 &&
-        fuse_max_freetickets <= ftick->tk_data->freeticket_counter) {
-        die = 1;
-    } else {
-        fuse_lck_mtx_unlock(ftick->tk_data->ticket_mtx);
-        fticket_refresh(ftick);
-        fuse_lck_mtx_lock(ftick->tk_data->ticket_mtx);
-    }
-
-    /* locked here */
-
-    if (die) {
-        fuse_remove_allticks(ftick);
-        fuse_lck_mtx_unlock(ftick->tk_data->ticket_mtx);
+    die = refcount_release(&ftick->tk_refcount);
+    if (die)
         fticket_destroy(ftick);
-    } else {
-        fuse_push_freeticks(ftick);
-        fuse_lck_mtx_unlock(ftick->tk_data->ticket_mtx);
-    }
-}
 
-void
-fuse_ticket_drop_invalid(struct fuse_ticket *ftick)
-{
-    debug_printf("ftick=%p\n", ftick);
-
-    if (ftick->tk_flag & FT_INVAL) {
-        fuse_ticket_drop(ftick);
-    }
+    return die;
 }
 
 void

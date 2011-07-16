@@ -6,6 +6,9 @@
 #ifndef _FUSE_IPC_H_
 #define _FUSE_IPC_H_
 
+#include <sys/param.h>
+#include <sys/refcount.h>
+
 struct fuse_iov {
     void   *base;
     size_t  len;
@@ -38,21 +41,19 @@ struct fuse_ticket {
     struct fuse_data            *tk_data;
     int                          tk_flag;
     uint32_t                     tk_age;
-
-    STAILQ_ENTRY(fuse_ticket)    tk_freetickets_link;
-    TAILQ_ENTRY(fuse_ticket)     tk_alltickets_link;
+    u_int                        tk_refcount;
 
     /* fields for initiating an upgoing message */
     struct fuse_iov              tk_ms_fiov;
     void                        *tk_ms_bufdata;
-    unsigned long                tk_ms_bufsize;
+    size_t                       tk_ms_bufsize;
     enum { FT_M_FIOV, FT_M_BUF } tk_ms_type;
     STAILQ_ENTRY(fuse_ticket)    tk_ms_link;
 
     /* fields for handling answers coming from userspace */
     struct fuse_iov              tk_aw_fiov;
     void                        *tk_aw_bufdata;
-    unsigned long                tk_aw_bufsize;
+    size_t                       tk_aw_bufsize;
     enum { FT_A_FIOV, FT_A_BUF } tk_aw_type;
 
     struct fuse_out_header       tk_aw_ohead;
@@ -131,9 +132,6 @@ struct fuse_data {
     TAILQ_HEAD(, fuse_ticket)  aw_head;
 
     struct mtx                 ticket_mtx;
-    STAILQ_HEAD(, fuse_ticket) freetickets_head;
-    TAILQ_HEAD(, fuse_ticket)  alltickets_head;
-    uint32_t                   freeticket_counter;
     uint64_t                   ticketer;
 
 #ifdef FUSE_EXPLICIT_RENAME_LOCK
@@ -193,6 +191,7 @@ fuse_ms_push(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
     mtx_assert(&ftick->tk_data->ms_mtx, MA_OWNED);
+    refcount_acquire(&ftick->tk_refcount);
     STAILQ_INSERT_TAIL(&ftick->tk_data->ms_head, ftick, tk_ms_link);
 }
 
@@ -221,6 +220,7 @@ fuse_aw_push(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
     mtx_assert(&ftick->tk_data->aw_mtx, MA_OWNED);
+    refcount_acquire(&ftick->tk_refcount);
     TAILQ_INSERT_TAIL(&ftick->tk_data->aw_head, ftick, tk_aw_link);
 }
 
@@ -253,8 +253,7 @@ fuse_aw_pop(struct fuse_data *data)
 }
 
 struct fuse_ticket *fuse_ticket_fetch(struct fuse_data *data);
-void fuse_ticket_drop(struct fuse_ticket *ftick);
-void fuse_ticket_drop_invalid(struct fuse_ticket *ftick);
+int fuse_ticket_drop(struct fuse_ticket *ftick);
 void fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t *handler);
 void fuse_insert_message(struct fuse_ticket *ftick);
 
