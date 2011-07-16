@@ -140,6 +140,7 @@ fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 		goto out;
 	}
 	dev->si_drv1 = NULL;
+	fuse_lck_mtx_unlock(data->aw_mtx);
 	FUSE_UNLOCK();
 
 	fdata_destroy(data);

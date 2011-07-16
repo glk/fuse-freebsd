@@ -138,11 +138,13 @@ fticket_alloc(struct fuse_data *data)
 {
     struct fuse_ticket *ftick;
 
-    debug_printf("data=%p\n", data);
-
     ftick = malloc(sizeof(*ftick), M_FUSEMSG, M_WAITOK | M_ZERO);
 
+    debug_printf("ftick=%p data=%p\n", ftick, data);
+
+    mtx_lock(&data->ticket_mtx);
     ftick->tk_unique = data->ticketer++;
+    mtx_unlock(&data->ticket_mtx);
     ftick->tk_data = data;
 
     fiov_init(&ftick->tk_ms_fiov, sizeof(struct fuse_in_header));
@@ -182,6 +184,12 @@ static void
 fticket_destroy(struct fuse_ticket *ftick)
 {
     debug_printf("ftick=%p\n", ftick);
+
+    KASSERT(ftick->tk_ms_link.stqe_next == NULL,
+        ("FUSE: destroying ticket still on message list %p", ftick));
+    KASSERT(ftick->tk_aw_link.tqe_next == NULL &&
+        ftick->tk_aw_link.tqe_prev == NULL,
+        ("FUSE: destroying ticket still on answer delivery list %p", ftick));
 
     fiov_teardown(&ftick->tk_ms_fiov);
 
@@ -225,12 +233,12 @@ fticket_wait_answer(struct fuse_ticket *ftick)
     }
 
 out:
-    fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
-
     if (!(err || fticket_answered(ftick))) {
         debug_printf("FUSE: requester was woken up but still no answer");
         err = ENXIO;
     }
+
+    fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
 
     return err;
 }

@@ -79,6 +79,7 @@ int
 fticket_answered(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    mtx_assert(&ftick->tk_aw_mtx, MA_OWNED);
     return (ftick->tk_flag & FT_ANSW);
 }
 
@@ -87,6 +88,7 @@ void
 fticket_set_answered(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    mtx_assert(&ftick->tk_aw_mtx, MA_OWNED);
     ftick->tk_flag |= FT_ANSW;
 }
 
@@ -190,6 +192,7 @@ void
 fuse_ms_push(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    mtx_assert(&ftick->tk_data->ms_mtx, MA_OWNED);
     STAILQ_INSERT_TAIL(&ftick->tk_data->ms_head, ftick, tk_ms_link);
 }
 
@@ -200,9 +203,13 @@ fuse_ms_pop(struct fuse_data *data)
     struct fuse_ticket *ftick = NULL;
 
     DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
+    mtx_assert(&data->ms_mtx, MA_OWNED);
 
     if ((ftick = STAILQ_FIRST(&data->ms_head))) {
         STAILQ_REMOVE_HEAD(&data->ms_head, tk_ms_link);
+#ifdef INVARIANTS
+        ftick->tk_ms_link.stqe_next = NULL;
+#endif
     }
 
     return ftick;
@@ -213,6 +220,7 @@ void
 fuse_aw_push(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
+    mtx_assert(&ftick->tk_data->aw_mtx, MA_OWNED);
     TAILQ_INSERT_TAIL(&ftick->tk_data->aw_head, ftick, tk_aw_link);
 }
 
@@ -222,6 +230,10 @@ fuse_aw_remove(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
     TAILQ_REMOVE(&ftick->tk_data->aw_head, ftick, tk_aw_link);
+#ifdef INVARIANTS
+    ftick->tk_aw_link.tqe_next = NULL;
+    ftick->tk_aw_link.tqe_prev = NULL;
+#endif
 }
 
 static __inline__
@@ -231,6 +243,7 @@ fuse_aw_pop(struct fuse_data *data)
     struct fuse_ticket *ftick = NULL;
 
     DEBUGX(FUSE_DEBUG_IPC, "-> data=%p\n", data);
+    mtx_assert(&ftick->tk_data->aw_mtx, MA_OWNED);
 
     if ((ftick = TAILQ_FIRST(&data->aw_head))) {
         fuse_aw_remove(ftick);
