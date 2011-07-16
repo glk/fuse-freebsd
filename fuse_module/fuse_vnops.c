@@ -172,7 +172,7 @@ fuse_vnop_access(struct vop_access_args *ap)
         if (vnode_isvroot(vp)) {
             return 0;
         }
-        return EBADF;
+        return ENXIO;
     }
 
     if (!(data->dataflags & FSESS_INITED)) {
@@ -274,7 +274,7 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_fs(dvp)) {
+    if (fuse_isdeadfs(dvp)) {
         panic("FUSE: fuse_vnop_create(): called on a dead file system");
     }
 
@@ -591,7 +591,7 @@ fuse_vnop_link(struct vop_link_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_fs(vp)) {
+    if (fuse_isdeadfs(vp)) {
         panic("FUSE: fuse_vnop_link(): called on a dead file system");
     }
 
@@ -1069,7 +1069,7 @@ fuse_vnop_mkdir(struct vop_mkdir_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_fs(dvp)) {
+    if (fuse_isdeadfs(dvp)) {
         panic("FUSE: fuse_vnop_mkdir(): called on a dead file system");
     }
 
@@ -1107,8 +1107,8 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
 
     fuse_trace_printf_vnop();
 
-    if (fuse_isdeadfs_fs(dvp)) {
-        panic("fuse_vnop_mknod(): called on a dead file system");
+    if (fuse_isdeadfs(dvp)) {
+        panic("FUSE: fuse_vnop_mknod(): called on a dead file system");
     }
 
     fmni.mode = MAKEIMODE(vap->va_type, vap->va_mode);
@@ -1195,7 +1195,7 @@ fuse_vnop_read(struct vop_read_args *ap)
         VTOI(vp), uio->uio_offset, uio->uio_resid);
 
     if (fuse_isdeadfs(vp)) {
-        return EIO;
+        return ENXIO;
     }
 
     return fuse_io_dispatch(vp, uio, ioflag, cred);
@@ -1228,7 +1228,7 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
     DEBUG2G("inode=%jd\n", VTOI(vp));
 
     if (fuse_isdeadfs(vp)) {
-        return EBADF;
+        return ENXIO;
     }
 
     if ( /* XXXIP ((uio_iovcnt(uio) > 1)) || */
@@ -1285,7 +1285,7 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
     DEBUG2G("inode=%jd\n", VTOI(vp));
 
     if (fuse_isdeadfs(vp)) {
-        return EBADF;
+        return ENXIO;
     }
 
     if (!vnode_islnk(vp)) {
@@ -1378,7 +1378,7 @@ fuse_vnop_remove(struct vop_remove_args *ap)
     DEBUG2G("inode=%jd name=%*s\n",
         VTOI(vp), (int)cnp->cn_namelen, cnp->cn_nameptr);
 
-    if (fuse_isdeadfs_fs(vp)) {
+    if (fuse_isdeadfs(vp)) {
         panic("FUSE: fuse_vnop_remove(): called on a dead file system");
     }
 
@@ -1425,7 +1425,7 @@ fuse_vnop_rename(struct vop_rename_args *ap)
         (tvp == NULL ? (intmax_t)-1 : VTOI(tvp)),
 	(int)tcnp->cn_namelen, tcnp->cn_nameptr);
 
-    if (fuse_isdeadfs_fs(fdvp)) {
+    if (fuse_isdeadfs(fdvp)) {
         panic("FUSE: fuse_vnop_rename(): called on a dead file system");
     }
 
@@ -1497,7 +1497,7 @@ fuse_vnop_rmdir(struct vop_rmdir_args *ap)
 
     DEBUG2G("inode=%jd\n", VTOI(vp));
 
-    if (fuse_isdeadfs_fs(vp)) {
+    if (fuse_isdeadfs(vp)) {
         panic("FUSE: fuse_vnop_rmdir(): called on a dead file system");
     }
 
@@ -1543,7 +1543,7 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
     DEBUG2G("inode=%jd\n", VTOI(vp));
 
     if (fuse_isdeadfs(vp)) {
-        return EBADF;
+        return ENXIO;
     }
 
     fdisp_init(&fdi, sizeof(*fsai));
@@ -1688,9 +1688,9 @@ fuse_vnop_strategy(struct vop_strategy_args *ap)
 
     if (!vp || fuse_isdeadfs(vp)) {
         bp->b_ioflags |= BIO_ERROR;
-        bp->b_error = EIO;
+        bp->b_error = ENXIO;
         bufdone(bp);
-        return EIO;
+        return ENXIO;
     }
 
     if (bp->b_iocmd == BIO_WRITE)
@@ -1735,7 +1735,7 @@ fuse_vnop_symlink(struct vop_symlink_args *ap)
     DEBUG2G("inode=%jd name=%*s\n",
         VTOI(dvp), (int)cnp->cn_namelen, cnp->cn_nameptr);
 
-    if (fuse_isdeadfs_fs(dvp)) {
+    if (fuse_isdeadfs(dvp)) {
         panic("FUSE: fuse_vnop_symlink(): called on a dead file system");
     }
 
@@ -1783,7 +1783,7 @@ fuse_vnop_write(struct vop_write_args *ap)
     fuse_trace_printf_vnop();
 
     if (fuse_isdeadfs(vp)) {
-        return EIO;
+        return ENXIO;
     }
 
     fuse_vnode_refreshsize(vp, cred);

@@ -138,7 +138,7 @@ fuse_read_biobackend(struct vnode *vp, struct uio *uio,
 
     do {
         if (fuse_isdeadfs(vp)) {
-            err = EIO;
+            err = ENXIO;
             break;
         }
 
@@ -343,7 +343,7 @@ fuse_write_biobackend(struct vnode *vp, struct uio *uio,
      */
     do {
         if (fuse_isdeadfs(vp)) {
-            err = EIO;
+            err = ENXIO;
             break;
         }
 

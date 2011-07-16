@@ -355,14 +355,6 @@ fdata_destroy(struct fuse_data *data)
     free(data,M_FUSEMSG);
 }
 
-int
-fdata_get_dead(struct fuse_data *data)
-{
-    debug_printf("data=%p\n", data);
-
-    return (data->dataflags & FSESS_DEAD);
-}
-
 void
 fdata_set_dead(struct fuse_data *data)
 {
