@@ -135,14 +135,15 @@ fticket_ctor(void *mem, int size, void *arg, int flags)
     FUSE_ASSERT_MS_DONE(ftick);
     FUSE_ASSERT_AW_DONE(ftick);
 
-    mtx_lock(&data->ticket_mtx);
-    ftick->tk_unique = data->ticketer++;
-    mtx_unlock(&data->ticket_mtx);
     ftick->tk_data = data;
 
     fiov_init(&ftick->tk_ms_fiov, sizeof(struct fuse_in_header));
     ftick->tk_ms_type = FT_M_FIOV;
 
+    /* May be truncated to 32 bits */
+    ftick->tk_unique = atomic_fetchadd_long(&data->ticketer, 1);
+    if (ftick->tk_unique == 0)
+        ftick->tk_unique = atomic_fetchadd_long(&data->ticketer, 1);
     mtx_init(&ftick->tk_aw_mtx, "fuse answer delivery mutex", NULL, MTX_DEF);
     fiov_init(&ftick->tk_aw_fiov, 0);
     ftick->tk_aw_type = FT_A_FIOV;
@@ -407,13 +408,14 @@ fuse_ticket_fetch(struct fuse_data *data)
     debug_printf("data=%p\n", data);
 
     ftick = fticket_alloc(data);
-    fuse_lck_mtx_lock(data->ticket_mtx);
 
-    if (!(data->dataflags & FSESS_INITED) && data->ticketer > 1) {
-        err = msleep(&data->ticketer, &data->ticket_mtx, PCATCH | PDROP,
-                     "fu_ini", 0);
-    } else {
-        fuse_lck_mtx_unlock(data->ticket_mtx);
+    if (!(data->dataflags & FSESS_INITED) && data->ticketer > 2) {
+        /* Sleep until get answer for INIT messsage */
+        fuse_lck_mtx_lock(data->ticket_mtx);
+        if (!(data->dataflags & FSESS_INITED) && data->ticketer > 2) {
+            err = msleep(&data->ticketer, &data->ticket_mtx, PCATCH | PDROP,
+                         "fu_ini", 0);
+        }
     }
 
     if (err) {
