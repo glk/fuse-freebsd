@@ -137,16 +137,13 @@ fticket_ctor(void *mem, int size, void *arg, int flags)
 
     ftick->tk_data = data;
 
-    fiov_init(&ftick->tk_ms_fiov, sizeof(struct fuse_in_header));
-    ftick->tk_ms_type = FT_M_FIOV;
+    if (ftick->tk_unique != 0)
+	    fticket_refresh(ftick);
 
     /* May be truncated to 32 bits */
     ftick->tk_unique = atomic_fetchadd_long(&data->ticketer, 1);
     if (ftick->tk_unique == 0)
         ftick->tk_unique = atomic_fetchadd_long(&data->ticketer, 1);
-    mtx_init(&ftick->tk_aw_mtx, "fuse answer delivery mutex", NULL, MTX_DEF);
-    fiov_init(&ftick->tk_aw_fiov, 0);
-    ftick->tk_aw_type = FT_A_FIOV;
 
     refcount_init(&ftick->tk_refcount, 1);
     atomic_add_acq_int(&fuse_ticket_count, 1);
@@ -164,13 +161,7 @@ fticket_dtor(void *mem, int size, void *arg)
     FUSE_ASSERT_MS_DONE(ftick);
     FUSE_ASSERT_AW_DONE(ftick);
 
-    fiov_teardown(&ftick->tk_ms_fiov);
-    fiov_teardown(&ftick->tk_aw_fiov);
-    mtx_destroy(&ftick->tk_aw_mtx);
-
     atomic_subtract_acq_int(&fuse_ticket_count, 1);
-
-    bzero(ftick, sizeof(struct fuse_ticket)); // XXX
 }
 
 static int
@@ -182,6 +173,13 @@ fticket_init(void *mem, int size, int flags)
 
     bzero(ftick, sizeof(struct fuse_ticket));
 
+    fiov_init(&ftick->tk_ms_fiov, sizeof(struct fuse_in_header));
+    ftick->tk_ms_type = FT_M_FIOV;
+
+    mtx_init(&ftick->tk_aw_mtx, "fuse answer delivery mutex", NULL, MTX_DEF);
+    fiov_init(&ftick->tk_aw_fiov, 0);
+    ftick->tk_aw_type = FT_A_FIOV;
+
     return 0;
 }
 
@@ -192,6 +190,9 @@ fticket_fini(void *mem, int size)
 
     DEBUG("ftick=%p\n", ftick);
 
+    fiov_teardown(&ftick->tk_ms_fiov);
+    fiov_teardown(&ftick->tk_aw_fiov);
+    mtx_destroy(&ftick->tk_aw_mtx);
 }
 
 static __inline struct fuse_ticket *
