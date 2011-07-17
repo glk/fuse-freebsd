@@ -346,8 +346,6 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
     data->dataflags = 0;
     mtx_init(&data->ms_mtx, "fuse message list mutex", NULL, MTX_DEF);
     STAILQ_INIT(&data->ms_head);
-    mtx_init(&data->ticket_mtx, "fuse ticketer mutex", NULL, MTX_DEF);
-    debug_printf("ALLOC_INIT data=%p ticket_mtx=%p\n", data, &data->ticket_mtx);
     mtx_init(&data->aw_mtx, "fuse answer list mutex", NULL, MTX_DEF);
     TAILQ_INIT(&data->aw_head);
     data->ticketer = 0;
@@ -369,7 +367,6 @@ fdata_destroy(struct fuse_data *data)
     /* Driving off stage all that stuff thrown at device... */
     mtx_destroy(&data->ms_mtx);
     mtx_destroy(&data->aw_mtx);
-    mtx_destroy(&data->ticket_mtx);
 #ifdef FUSE_EXPLICIT_RENAME_LOCK
     sx_destroy(&data->rename_lock);
 #endif
@@ -395,9 +392,9 @@ fdata_set_dead(struct fuse_data *data)
     selwakeuppri(&data->ks_rsel, PZERO + 1);
     fuse_lck_mtx_unlock(data->ms_mtx);
 
-    fuse_lck_mtx_lock(data->ticket_mtx);
+    FUSE_LOCK();
     wakeup(&data->ticketer);
-    fuse_lck_mtx_unlock(data->ticket_mtx);
+    FUSE_UNLOCK();
 }
 
 struct fuse_ticket *
@@ -412,9 +409,9 @@ fuse_ticket_fetch(struct fuse_data *data)
 
     if (!(data->dataflags & FSESS_INITED) && data->ticketer > 2) {
         /* Sleep until get answer for INIT messsage */
-        fuse_lck_mtx_lock(data->ticket_mtx);
+        FUSE_LOCK();
         if (!(data->dataflags & FSESS_INITED) && data->ticketer > 2) {
-            err = msleep(&data->ticketer, &data->ticket_mtx, PCATCH | PDROP,
+            err = msleep(&data->ticketer, &fuse_mtx, PCATCH | PDROP,
                          "fu_ini", 0);
         }
     }

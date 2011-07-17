@@ -138,7 +138,6 @@ struct fuse_data {
     struct mtx                 aw_mtx;
     TAILQ_HEAD(, fuse_ticket)  aw_head;
 
-    struct mtx                 ticket_mtx;
     u_long                     ticketer;
 
 #ifdef FUSE_EXPLICIT_RENAME_LOCK
