@@ -49,7 +49,6 @@ struct fuse_ticket {
     uint64_t                     tk_unique;
     struct fuse_data            *tk_data;
     int                          tk_flag;
-    uint32_t                     tk_age;
     u_int                        tk_refcount;
 
     /* fields for initiating an upgoing message */

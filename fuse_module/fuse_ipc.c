@@ -22,6 +22,7 @@
 #include <sys/mount.h>
 #include <sys/vnode.h>
 #include <sys/sysctl.h>
+#include <vm/uma.h>
 
 #include "fuse.h"
 #include "fuse_node.h"
@@ -52,9 +53,9 @@ static fuse_handler_t  fuse_standard_handler;
 SYSCTL_NODE(_vfs, OID_AUTO, fuse, CTLFLAG_RW, 0, "FUSE tunables");
 SYSCTL_STRING(_vfs_fuse, OID_AUTO, fuse4bsd_version, CTLFLAG_RD,
               FUSE4BSD_VERSION, 0, "fuse4bsd version");
-static int fuse_max_freetickets = 1024;
-SYSCTL_INT(_vfs_fuse, OID_AUTO, max_freetickets, CTLFLAG_RW,
-            &fuse_max_freetickets, 0, "limit for number of free tickets kept");
+static int fuse_ticket_count = 0;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, ticket_count, CTLFLAG_RW,
+            &fuse_ticket_count, 0, "number of allocated tickets");
 static long fuse_iov_permanent_bufsize = 1 << 19;
 SYSCTL_LONG(_vfs_fuse, OID_AUTO, iov_permanent_bufsize, CTLFLAG_RW,
             &fuse_iov_permanent_bufsize, 0,
@@ -63,12 +64,9 @@ static int fuse_iov_credit = 16;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, iov_credit, CTLFLAG_RW,
             &fuse_iov_credit, 0,
             "how many times is an oversized fuse_iov tolerated");
-static unsigned maxtickets = 0;
-SYSCTL_UINT(_vfs_fuse, OID_AUTO, maxtickets, CTLFLAG_RW,
-            &maxtickets, 0, "limit how many tickets are tolerated");
 
-MALLOC_DEFINE(M_FUSEMSG, "fuse_messaging",
-              "buffer for fuse messaging related things");
+MALLOC_DEFINE(M_FUSEMSG, "fuse_msgbuf", "fuse message buffer");
+static uma_zone_t ticket_zone;
 
 void
 fiov_init(struct fuse_iov *fiov, size_t size)
@@ -126,14 +124,16 @@ fiov_refresh(struct fuse_iov *fiov)
     fiov_adjust(fiov, 0);
 }
 
-static struct fuse_ticket *
-fticket_alloc(struct fuse_data *data)
+static int
+fticket_ctor(void *mem, int size, void *arg, int flags)
 {
-    struct fuse_ticket *ftick;
-
-    ftick = malloc(sizeof(*ftick), M_FUSEMSG, M_WAITOK | M_ZERO);
+    struct fuse_ticket *ftick = mem;
+    struct fuse_data *data = arg;
 
     debug_printf("ftick=%p data=%p\n", ftick, data);
+
+    FUSE_ASSERT_MS_DONE(ftick);
+    FUSE_ASSERT_AW_DONE(ftick);
 
     mtx_lock(&data->ticket_mtx);
     ftick->tk_unique = data->ticketer++;
@@ -148,8 +148,61 @@ fticket_alloc(struct fuse_data *data)
     ftick->tk_aw_type = FT_A_FIOV;
 
     refcount_init(&ftick->tk_refcount, 1);
+    atomic_add_acq_int(&fuse_ticket_count, 1);
 
-    return ftick;
+    return 0;
+}
+
+static void
+fticket_dtor(void *mem, int size, void *arg)
+{
+    struct fuse_ticket *ftick = mem;
+
+    debug_printf("ftick=%p\n", ftick);
+
+    FUSE_ASSERT_MS_DONE(ftick);
+    FUSE_ASSERT_AW_DONE(ftick);
+
+    fiov_teardown(&ftick->tk_ms_fiov);
+    fiov_teardown(&ftick->tk_aw_fiov);
+    mtx_destroy(&ftick->tk_aw_mtx);
+
+    atomic_subtract_acq_int(&fuse_ticket_count, 1);
+
+    bzero(ftick, sizeof(struct fuse_ticket)); // XXX
+}
+
+static int
+fticket_init(void *mem, int size, int flags)
+{
+    struct fuse_ticket *ftick = mem;
+
+    DEBUG("ftick=%p\n", ftick);
+
+    bzero(ftick, sizeof(struct fuse_ticket));
+
+    return 0;
+}
+
+static void
+fticket_fini(void *mem, int size)
+{
+    struct fuse_ticket *ftick = mem;
+
+    DEBUG("ftick=%p\n", ftick);
+
+}
+
+static __inline struct fuse_ticket *
+fticket_alloc(struct fuse_data *data)
+{
+    return uma_zalloc_arg(ticket_zone, data, M_WAITOK);
+}
+
+static __inline void
+fticket_destroy(struct fuse_ticket *ftick)
+{
+    return uma_zfree(ticket_zone, ftick);
 }
 
 static __inline__
@@ -157,6 +210,9 @@ void
 fticket_refresh(struct fuse_ticket *ftick)
 {
     debug_printf("ftick=%p\n", ftick);
+
+    FUSE_ASSERT_MS_DONE(ftick);
+    FUSE_ASSERT_AW_DONE(ftick);
 
     fiov_refresh(&ftick->tk_ms_fiov);
     ftick->tk_ms_bufdata = NULL;
@@ -172,23 +228,6 @@ fticket_refresh(struct fuse_ticket *ftick)
     ftick->tk_aw_type = FT_A_FIOV;
 
     ftick->tk_flag = 0;
-    ftick->tk_age++;
-}
-
-static void
-fticket_destroy(struct fuse_ticket *ftick)
-{
-    debug_printf("ftick=%p\n", ftick);
-
-    FUSE_ASSERT_MS_DONE(ftick);
-    FUSE_ASSERT_AW_DONE(ftick);
-
-    fiov_teardown(&ftick->tk_ms_fiov);
-
-    mtx_destroy(&ftick->tk_aw_mtx);
-    fiov_teardown(&ftick->tk_aw_fiov);
-
-    free(ftick, M_FUSEMSG);
 }
 
 static int
@@ -778,4 +817,18 @@ out:
     debug_printf("IPC: dropping ticket, err = %d\n", err);
 
     return err;
+}
+
+void
+fuse_ipc_init(void)
+{
+    ticket_zone = uma_zcreate("fuse_ticket", sizeof(struct fuse_ticket),
+        fticket_ctor, fticket_dtor, fticket_init, fticket_fini,
+        UMA_ALIGN_PTR, 0);
+}
+
+void
+fuse_ipc_destroy(void)
+{
+    uma_zdestroy(ticket_zone);
 }

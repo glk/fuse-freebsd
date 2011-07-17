@@ -62,6 +62,7 @@ fuse_bringdown(eventhandler_tag eh_tag)
 
 	EVENTHANDLER_DEREGISTER(dev_clone, eh_tag);
 
+	fuse_ipc_destroy();
 	clone_cleanup(&fuseclones);
 	mtx_destroy(&fuse_mtx);
 }
@@ -84,6 +85,8 @@ fuse_loader(struct module *m, int what, void *arg)
 			mtx_destroy(&fuse_mtx);
 			return (ENOMEM);
 		}
+
+		fuse_ipc_init();
 
 		/* vfs_modevent ignores its first arg */
 		if ((err = vfs_modevent(NULL, what, &fuse_vfsconf)))
