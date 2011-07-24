@@ -127,8 +127,6 @@ struct fuse_data {
     struct cdev               *fdev;
     struct mount              *mp;
     struct vnode              *vroot;
-    enum mountpri              mpri;
-    int                        mntco;
     struct ucred              *daemoncred;
     int                        dataflags;
 
@@ -179,15 +177,14 @@ static __inline__
 struct fuse_data *
 fuse_get_devdata(struct cdev *fdev)
 {
-	return (fdev->si_drv1);
+    return fdev->si_drv1;
 }
 
 static __inline__
 struct fuse_data *
 fuse_get_mpdata(struct mount *mp)
 {
-    struct fuse_data *data = mp->mnt_data;
-    return (data->mpri == FM_PRIMARY ? data : NULL);
+    return mp->mnt_data;
 }
 
 static __inline__
@@ -276,7 +273,7 @@ fuse_libabi_geq(struct fuse_data *data, uint32_t abi_maj, uint32_t abi_min)
 }
 
 struct fuse_data *fdata_alloc(struct cdev *dev, struct ucred *cred);
-void fdata_destroy(struct fuse_data *data);
+void fdata_trydestroy(struct fuse_data *data);
 void fdata_set_dead(struct fuse_data *data);
 
 static __inline__

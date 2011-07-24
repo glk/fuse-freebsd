@@ -87,8 +87,8 @@ fuse_device_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 
 	FUSE_LOCK();
 	if (fuse_get_devdata(dev)) {
+		fdata_trydestroy(fdata);
 		FUSE_UNLOCK();
-		fdata_destroy(fdata);
 		goto busy;
 	} else {
 		fdata->dataflags |= FSESS_OPENED;
@@ -108,48 +108,37 @@ static int
 fuse_device_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 {
 	struct fuse_data *data;
+	struct fuse_ticket *tick;
 
-	FUSE_LOCK();
 	data = fuse_get_devdata(dev);
-	if (! data)
+	if (!data)
 		panic("no fuse data upon fuse device close");
 	KASSERT(data->dataflags | FSESS_OPENED,
 	        ("fuse device is already closed upon close"));
 	fdata_set_dead(data);
-        data->dataflags &= ~FSESS_OPENED;
-	fuse_lck_mtx_lock(data->aw_mtx);
 
+	FUSE_LOCK();
+        data->dataflags &= ~FSESS_OPENED;
+
+	fuse_lck_mtx_lock(data->aw_mtx);
 	/* wakup poll()ers */
 	selwakeuppri(&data->ks_rsel, PZERO + 1);
-
-	DEBUG("mntco %d\n", data->mntco);
-	if (data->mntco > 0) {
-		struct fuse_ticket *tick;
-
-		/* Don't let syscall handlers wait in vain */
-		while ((tick = fuse_aw_pop(data))) {
-			fuse_lck_mtx_lock(tick->tk_aw_mtx);
-			fticket_set_answered(tick);
-			tick->tk_aw_errno = ENOTCONN;
-			wakeup(tick);
-			fuse_lck_mtx_unlock(tick->tk_aw_mtx);
-			fuse_lck_mtx_unlock(data->aw_mtx);
-			FUSE_ASSERT_AW_DONE(tick);
-			fuse_ticket_drop(tick);
-			fuse_lck_mtx_lock(data->aw_mtx);
-		}
-		fuse_lck_mtx_unlock(data->aw_mtx);
-
-		FUSE_UNLOCK();
-		goto out;
+	/* Don't let syscall handlers wait in vain */
+	while ((tick = fuse_aw_pop(data))) {
+		fuse_lck_mtx_lock(tick->tk_aw_mtx);
+		fticket_set_answered(tick);
+		tick->tk_aw_errno = ENOTCONN;
+		wakeup(tick);
+		fuse_lck_mtx_unlock(tick->tk_aw_mtx);
+		FUSE_ASSERT_AW_DONE(tick);
+		fuse_ticket_drop(tick);
 	}
-	dev->si_drv1 = NULL;
 	fuse_lck_mtx_unlock(data->aw_mtx);
+
+	dev->si_drv1 = NULL;
+	fdata_trydestroy(data);
 	FUSE_UNLOCK();
 
-	fdata_destroy(data);
-
-out:
 	DEBUG("%s: device closed by thread %d.\n", dev->si_name, td->td_tid);
 	return(0);
 }

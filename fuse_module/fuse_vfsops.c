@@ -72,58 +72,18 @@ SYSCTL_UINT(_vfs_fuse, OID_AUTO, sync_unmount, CTLFLAG_RW,
 
 MALLOC_DEFINE(M_FUSEVFS, "fuse_filesystem", "buffer for fuse vfs layer");
 
-#define FUSE_FLAGOPT(fnam, fval) do {				\
-    vfs_flagopt(opts, #fnam, &mntopts, fval);		\
-    vfs_flagopt(opts, "__" #fnam, &__mntopts, fval);	\
-} while (0)
-
 static int
-fuse_vfsop_mount(struct mount *mp)
+fuse_getdevice(const char *fspec, struct thread *td, struct cdev **fdevp)
 {
-    int err     = 0;
-    int mntopts = 0;
-    int __mntopts = 0;
-    int max_read_set = 0;
-    uint32_t max_read = ~0;
-    int daemon_timeout;
-
-    size_t len;
-
-    struct cdev *fdev;
-    struct fuse_data *data;
-    struct thread *td = curthread;
-    char *fspec, *subtype = NULL;
-    struct vnode *devvp;
-    struct vfsoptlist *opts;
     struct nameidata nd, *ndp = &nd;
-
-    fuse_trace_printf_vfsop();
-
-    if (mp->mnt_flag & MNT_UPDATE)
-        return EOPNOTSUPP;
-
-    mp->mnt_flag |= MNT_SYNCHRONOUS; 
-    /* Get the new options passed to mount */
-    opts = mp->mnt_optnew;
-
-    if (!opts)
-        return EINVAL;
-
-    /* `fspath' contains the mount point (eg. /mnt/fuse/sshfs); REQUIRED */
-    if (!vfs_getopts(opts, "fspath", &err))
-        return err;
-
-    /* `from' contains the device name (eg. /dev/fuse0); REQUIRED */
-    fspec = vfs_getopts(opts, "from", &err);
-    if (!fspec)
-        return err;
-
-    mp->mnt_data = NULL;
+    struct vnode *devvp;
+    struct cdev *fdev;
+    int err;
 
     /*
      * Not an update, or updating the name: look up the name
      * and verify that it refers to a sensible disk device.
-     */ 
+     */
 
     NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, td);
     if ((err = namei(ndp)) != 0)
@@ -155,11 +115,12 @@ fuse_vfsop_mount(struct mount *mp)
          */
 #ifdef MAC
         err = mac_check_vnode_open(td->td_ucred, devvp, VREAD|VWRITE);
-        if (! err)
+        if (!err)
 #endif
             err = VOP_ACCESS(devvp, VREAD|VWRITE, td->td_ucred, td);
         if (err) {
             vrele(devvp);
+            dev_rel(fdev);
             return err;
         }
     }
@@ -170,25 +131,67 @@ fuse_vfsop_mount(struct mount *mp)
      */
     vrele(devvp);
 
-    FUSE_LOCK();
     if (!fdev->si_devsw ||
         strcmp("fuse", fdev->si_devsw->d_name)) {
-        FUSE_UNLOCK();
+        dev_rel(fdev);
         return ENXIO;
     }
 
-    data = fuse_get_devdata(fdev);
-    if (data && data->dataflags & FSESS_OPENED) {
-        data->mntco++;
-        debug_printf("a.inc:mntco = %d\n", data->mntco);
-    } else {
-        FUSE_UNLOCK();
-        dev_rel(fdev);
-        return ENXIO;
-    }	
-    FUSE_UNLOCK();
+    *fdevp = fdev;
 
-    /* 
+    return 0;
+}
+
+#define FUSE_FLAGOPT(fnam, fval) do {				\
+    vfs_flagopt(opts, #fnam, &mntopts, fval);		\
+    vfs_flagopt(opts, "__" #fnam, &__mntopts, fval);	\
+} while (0)
+
+static int
+fuse_vfsop_mount(struct mount *mp)
+{
+    int err     = 0;
+    int mntopts = 0;
+    int __mntopts = 0;
+    int max_read_set = 0;
+    uint32_t max_read = ~0;
+    int daemon_timeout;
+
+    size_t len;
+
+    struct cdev *fdev;
+    struct fuse_data *data;
+    struct thread *td = curthread;
+    char *fspec, *subtype = NULL;
+    struct vfsoptlist *opts;
+
+    fuse_trace_printf_vfsop();
+
+    if (mp->mnt_flag & MNT_UPDATE)
+        return EOPNOTSUPP;
+
+    mp->mnt_flag |= MNT_SYNCHRONOUS;
+    mp->mnt_data = NULL;
+    /* Get the new options passed to mount */
+    opts = mp->mnt_optnew;
+
+    if (!opts)
+        return EINVAL;
+
+    /* `fspath' contains the mount point (eg. /mnt/fuse/sshfs); REQUIRED */
+    if (!vfs_getopts(opts, "fspath", &err))
+        return err;
+
+    /* `from' contains the device name (eg. /dev/fuse0); REQUIRED */
+    fspec = vfs_getopts(opts, "from", &err);
+    if (!fspec)
+        return err;
+
+    err = fuse_getdevice(fspec, td, &fdev);
+    if (err != 0)
+        return err;
+
+    /*
      * With the help of underscored options the mount program
      * can inform us from the flags it sets by default
      */
@@ -215,40 +218,52 @@ fuse_vfsop_mount(struct mount *mp)
     subtype = vfs_getopts(opts, "subtype=", &err);
     err = 0;
 
-    if (fdata_get_dead(data))
-        err = ENOTCONN;
-    if (mntopts & FSESS_DAEMON_CAN_SPY)
-        err = priv_check(td, PRIV_VFS_FUSE_ALLOWOTHER);
-
     DEBUG2G("mntopts 0x%x\n", mntopts);
 
-    /* Sanity + permission checks */ 
+    FUSE_LOCK();
+    data = fuse_get_devdata(fdev);
+    if (data == NULL || data->mp != NULL ||
+        (data->dataflags & FSESS_OPENED) == 0) {
+        DEBUG("invalid or not opened device: data=%p data.mp=%p\n",
+	    data, data != NULL ? data->mp : NULL);
+        err = ENXIO;
+        FUSE_UNLOCK();
+        goto out;
+    } else {
+        DEBUG("set mp: data=%p mp=%p\n", data, mp);
+        data->mp = mp;
+    }
+    if (fdata_get_dead(data)) {
+        DEBUG("device is dead during mount: data=%p\n", data);
+        err = ENOTCONN;
+        FUSE_UNLOCK();
+        goto out;
+    }
 
+    /* Sanity + permission checks */
     if (!data->daemoncred)
         panic("fuse daemon found, but identity unknown");
-
-    MPASS(data->mpri != FM_PRIMARY);
-    if (td->td_ucred->cr_uid != data->daemoncred->cr_uid)
+    if (mntopts & FSESS_DAEMON_CAN_SPY)
+        err = priv_check(td, PRIV_VFS_FUSE_ALLOWOTHER);
+    if (err == 0 && td->td_ucred->cr_uid != data->daemoncred->cr_uid)
         /* are we allowed to do the first mount? */
         err = priv_check(td, PRIV_VFS_FUSE_MOUNT_NONUSER);
-
     if (err) {
+        FUSE_UNLOCK();
         goto out;
     }
 
     /* We need this here as this slot is used by getnewvnode() */
     mp->mnt_stat.f_iosize = PAGE_SIZE;
-
     mp->mnt_data = data;
-
     data->mp = mp;
-    data->mpri = FM_PRIMARY;
     data->dataflags |= mntopts;
     data->max_read = max_read;
 #ifdef XXXIP
     if (!priv_check(td, PRIV_VFS_FUSE_SYNC_UNMOUNT))
         data->dataflags |= FSESS_CAN_SYNC_UNMOUNT;
 #endif
+    FUSE_UNLOCK();
 
     vfs_getnewfsid(mp);	
     mp->mnt_flag |= MNT_LOCAL;
@@ -266,11 +281,13 @@ fuse_vfsop_mount(struct mount *mp)
 
 out:
     if (err) {
-        data->mntco--;
         FUSE_LOCK();
-        if (data->mntco == 0 && ! (data->dataflags & FSESS_OPENED)) {
-            fdev->si_drv1 = NULL;
-            fdata_destroy(data);
+        if (data->mp == mp) {
+            /* Destroy device only if we acquired reference to it */
+            DEBUG("mount failed, destroy device: data=%p mp=%p err=%d\n",
+                data, mp, err);
+            data->mp = NULL;
+            fdata_trydestroy(data);
         }
         FUSE_UNLOCK();
         dev_rel(fdev);
@@ -328,15 +345,10 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
     fdata_set_dead(data);
 
 alreadydead:
-    data->mpri = FM_NOMOUNTED;
-    data->mntco--;
-
     FUSE_LOCK();
+    data->mp = NULL;
     fdev = data->fdev;
-    if (data->mntco == 0 && !(data->dataflags & FSESS_OPENED)) {
-        data->fdev->si_drv1 = NULL;
-        fdata_destroy(data);
-    }
+    fdata_trydestroy(data);
     FUSE_UNLOCK();
 
     MNT_ILOCK(mp);
@@ -347,7 +359,7 @@ alreadydead:
     dev_rel(fdev);
 
     return 0;
-}        
+}
 
 static int
 fuse_vfsop_root(struct mount *mp, int lkflags, struct vnode **vpp)

@@ -341,14 +341,11 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
 
     data = malloc(sizeof(struct fuse_data), M_FUSEMSG, M_WAITOK | M_ZERO);
 
-    data->mpri = FM_NOMOUNTED;
     data->fdev = fdev;
-    data->dataflags = 0;
     mtx_init(&data->ms_mtx, "fuse message list mutex", NULL, MTX_DEF);
     STAILQ_INIT(&data->ms_head);
     mtx_init(&data->aw_mtx, "fuse answer list mutex", NULL, MTX_DEF);
     TAILQ_INIT(&data->aw_head);
-    data->ticketer = 0;
     data->daemoncred = crhold(cred);
     data->daemon_timeout = FUSE_DEFAULT_DAEMON_TIMEOUT;
 
@@ -360,9 +357,23 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
 }
 
 void
-fdata_destroy(struct fuse_data *data)
+fdata_trydestroy(struct fuse_data *data)
 {
-    debug_printf("data=%p, destroy.mntco = %d\n", data, data->mntco);
+    DEBUG("data=%p data.mp=%p data.fdev=%p data.flags=%04x\n",
+	data, data->mp, data->fdev, data->dataflags);
+
+    if (data->mp != NULL) {
+        MPASS(data->mp->mnt_data == data);
+        return;
+    }
+
+    if (data->fdev->si_drv1 != NULL) {
+        MPASS(data->fdev->si_drv1 == data);
+        return;
+    }
+
+    DEBUG("destroy: data=%p\n", data);
+    MPASS((data->dataflags & FSESS_OPENED) == 0);
 
     /* Driving off stage all that stuff thrown at device... */
     mtx_destroy(&data->ms_mtx);
@@ -381,19 +392,18 @@ fdata_set_dead(struct fuse_data *data)
 {
     debug_printf("data=%p\n", data);
 
-    fuse_lck_mtx_lock(data->ms_mtx);
+    FUSE_LOCK();
     if (fdata_get_dead(data)) {
-        fuse_lck_mtx_unlock(data->ms_mtx);
+        FUSE_UNLOCK();
         return;
     }
 
+    fuse_lck_mtx_lock(data->ms_mtx);
     data->dataflags |= FSESS_DEAD;
     wakeup_one(data);
     selwakeuppri(&data->ks_rsel, PZERO + 1);
-    fuse_lck_mtx_unlock(data->ms_mtx);
-
-    FUSE_LOCK();
     wakeup(&data->ticketer);
+    fuse_lck_mtx_unlock(data->ms_mtx);
     FUSE_UNLOCK();
 }
 
