@@ -124,10 +124,6 @@ int fuse_lookup_cache_enable = 1;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, lookup_cache_enable, CTLFLAG_RW,
            &fuse_lookup_cache_enable, 0, "");
 
-static int fuse_reclaim_inactive = 0;
-SYSCTL_INT(_vfs_fuse, OID_AUTO, reclaim_inactive, CTLFLAG_RW,
-           &fuse_reclaim_inactive, 0, "");
-
 int fuse_pbuf_freecnt = -1;
 
 #if __FreeBSD_version >= 900011
@@ -555,8 +551,7 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
         }
     }
 
-    if ((fvdat->flag & FN_REVOKED) != 0 ||
-        (fuse_reclaim_inactive && vnode_vtype(vp) != VDIR)) {
+    if ((fvdat->flag & FN_REVOKED) != 0) {
         vrecycle(vp, td);
     }
 
