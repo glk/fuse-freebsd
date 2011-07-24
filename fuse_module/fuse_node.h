@@ -14,6 +14,7 @@
 #define FN_REVOKED           0x00000020
 #define FN_FLUSHINPROG       0x00000040
 #define FN_FLUSHWANT         0x00000080
+#define FN_SIZECHANGE        0x00000100
 
 struct fuse_vnode_data {
     /** self **/
@@ -48,6 +49,7 @@ struct fuse_vnode_data {
 extern struct vop_vector fuse_vnops;
 extern int fuse_data_cache_enable;
 extern int fuse_mmap_enable;
+extern int fuse_sync_resize;
 
 static __inline__
 void
@@ -94,10 +96,10 @@ void fuse_vnode_open(struct vnode *vp,
                      int32_t fuse_open_flags,
                      struct thread *td);
 
-int fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize);
-
 void fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred);
 
-void fuse_vnode_setsize(struct vnode *vp, struct ucred *cred, off_t newsize);
+int fuse_vnode_savesize(struct vnode *vp, struct ucred *cred);
+
+int fuse_vnode_setsize(struct vnode *vp, struct ucred *cred, off_t newsize);
 
 #endif /* _FUSE_NODE_H_ */

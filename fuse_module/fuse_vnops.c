@@ -204,6 +204,7 @@ static int
 fuse_vnop_close(struct vop_close_args *ap)
 {
     struct vnode *vp      = ap->a_vp;
+    struct ucred *cred    = ap->a_cred;
     int           fflag   = ap->a_fflag;
     int isdir = (vnode_isdir(vp)) ? 1 : 0;
     fufh_type_t fufh_type;
@@ -232,6 +233,10 @@ fuse_vnop_close(struct vop_close_args *ap)
         if (i == FUFH_MAXTYPE)
             panic("FUSE: fufh type %d found to be invalid in close (fflag=0x%x)\n",
                 fufh_type, fflag);
+    }
+
+    if ((VTOFUD(vp)->flag & FN_SIZECHANGE) != 0) {
+        fuse_vnode_savesize(vp, cred);
     }
 
     return 0;
@@ -445,6 +450,7 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
     struct vattr      *vap     = ap->a_vap;
     struct ucred      *cred    = ap->a_cred;
     struct thread     *td      = curthread;
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
 
     int err = 0;
     int dataflags;
@@ -461,7 +467,10 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
         if (vap != VTOVA(vp)) {
             memcpy(vap, VTOVA(vp), sizeof(*vap));
         }
-        debug_printf("fuse_getattr a: returning 0\n");
+        if ((fvdat->flag & FN_SIZECHANGE) != 0) {
+            vap->va_size = fvdat->filesize;
+        }
+        debug_printf("return cached: inode=%jd\n", VTOI(vp));
         return 0;
     }
 
@@ -493,13 +502,14 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
     if (vap != VTOVA(vp)) {
         memcpy(vap, VTOVA(vp), sizeof(*vap));
     }
+    if ((fvdat->flag & FN_SIZECHANGE) != 0)
+        vap->va_size = fvdat->filesize;
 
-    if (vnode_isreg(vp)) {
+    if (vnode_isreg(vp) && (fvdat->flag & FN_SIZECHANGE) == 0) {
         /*
          * This is for those cases when the file size changed without us
          * knowing, and we want to catch up.
          */
-        struct fuse_vnode_data *fvdat = VTOFUD(vp);
         off_t new_filesize = ((struct fuse_attr_out *)fdi.answ)->attr.size;
 
         if (fvdat->filesize != new_filesize) {
@@ -544,6 +554,11 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
         fufh = &(fvdat->fufh[type]);
         if (FUFH_IS_VALID(fufh)) {
             if (need_invalbuf) {
+                if ((VTOFUD(vp)->flag & FN_SIZECHANGE) != 0) {
+                    printf("FUSE: Delayed file size change for inactive vnode "
+                            "%jd\n", VTOI(vp));
+                    fuse_vnode_savesize(vp, NULL);
+                }
                 fuse_io_invalbuf(vp, td);
                 need_invalbuf = 0;
             }
@@ -1104,7 +1119,7 @@ fuse_vnop_mknod(struct vop_mknod_args *ap)
     err = fuse_internal_newentry(dvp, vpp, cnp, FUSE_MKNOD, &fmni,
                                  sizeof(fmni), vap->va_type);
 
-    if (err== 0) {
+    if (err == 0) {
         fuse_invalidate_attr(dvp);
     }
 
@@ -1655,6 +1670,7 @@ out:
     if (!err && sizechanged) {
         fuse_invalidate_attr(vp);
         fuse_vnode_setsize(vp, cred, newsize);
+        VTOFUD(vp)->flag &= ~FN_SIZECHANGE;
     }
 
     return err;

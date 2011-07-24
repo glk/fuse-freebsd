@@ -53,6 +53,14 @@ int fuse_mmap_enable = 1;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, mmap_enable, CTLFLAG_RW,
            &fuse_mmap_enable, 0, "");
 
+int fuse_refresh_size = 0;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, refresh_size, CTLFLAG_RW,
+           &fuse_refresh_size, 0, "");
+
+int fuse_sync_resize = 1;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, sync_resize, CTLFLAG_RW,
+           &fuse_sync_resize, 0, "");
+
 static void
 fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     uint64_t nodeid, enum vtype vtyp)
@@ -224,18 +232,17 @@ fuse_isvalid_attr(struct vnode *vp)
 }
 
 int
-fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
+fuse_vnode_savesize(struct vnode *vp, struct ucred *cred)
 {
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct thread *td = curthread;
     struct fuse_filehandle *fufh = NULL;
     struct fuse_dispatcher  fdi;
     struct fuse_setattr_in *fsai;
     int err = 0;
 
-    DEBUG("inode=%jd oldsize=%jd newsize=%jd\n",
-        VTOI(vp), VTOFUD(vp)->filesize, newsize);
+    DEBUG("inode=%jd size=%jd\n", VTOI(vp), fvdat->filesize);
     ASSERT_VOP_ELOCKED(vp, "fuse_io_extend");
-    MPASS(newsize > VTOFUD(vp)->filesize);
 
     if (fuse_isdeadfs(vp)) {
         return EBADF;
@@ -259,7 +266,7 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
     fsai->valid = 0;
 
     // Truncate to a new value.
-    fsai->size = newsize;
+    fsai->size = fvdat->filesize;
     fsai->valid |= FATTR_SIZE;
 
     fuse_filehandle_getrw(vp, FUFH_WRONLY, &fufh);
@@ -270,11 +277,10 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
 
     err = fdisp_wait_answ(&fdi);
     fdisp_destroy(&fdi);
+    if (err == 0)
+	    fvdat->flag &= ~FN_SIZECHANGE;
 
     fuse_invalidate_attr(vp);
-    if (!err) {
-        fuse_vnode_setsize(vp, cred, newsize);
-    }
 
     return err;
 }
@@ -282,20 +288,25 @@ fuse_vnode_extend(struct vnode *vp, struct ucred *cred, off_t newsize)
 void
 fuse_vnode_refreshsize(struct vnode *vp, struct ucred *cred)
 {
+
+    struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct vattr va;
 
-    if (fuse_isvalid_attr(vp))
+    if ((fvdat->flag & FN_SIZECHANGE) != 0 ||
+        (fuse_refresh_size == 0 && fvdat->filesize != 0) ||
+	fuse_isvalid_attr(vp))
         return;
 
     VOP_GETATTR(vp, &va, cred);
     DEBUG("refreshed file size: %jd\n", VTOFUD(vp)->filesize);
 }
 
-void
+int
 fuse_vnode_setsize(struct vnode *vp, struct ucred *cred, off_t newsize)
 {
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     off_t oldsize;
+    int err = 0;
 
     DEBUG("inode=%jd oldsize=%jd newsize=%jd\n",
         VTOI(vp), fvdat->filesize, newsize);
@@ -303,11 +314,14 @@ fuse_vnode_setsize(struct vnode *vp, struct ucred *cred, off_t newsize)
 
     oldsize = fvdat->filesize;
     fvdat->filesize = newsize;
+    fvdat->flag |= FN_SIZECHANGE;
 
     if (newsize < oldsize) {
-        vtruncbuf(vp, cred, curthread, newsize, fuse_iosize(vp));
+        err = vtruncbuf(vp, cred, curthread, newsize, fuse_iosize(vp));
     }
 
     vnode_pager_setsize(vp, newsize);
     fuse_invalidate_attr(vp);
+
+    return err;
 }
