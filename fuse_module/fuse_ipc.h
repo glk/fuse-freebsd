@@ -251,7 +251,7 @@ fuse_aw_pop(struct fuse_data *data)
 {
     struct fuse_ticket *ftick = NULL;
 
-    mtx_assert(&ftick->tk_data->aw_mtx, MA_OWNED);
+    mtx_assert(&data->aw_mtx, MA_OWNED);
 
     if ((ftick = TAILQ_FIRST(&data->aw_head))) {
         fuse_aw_remove(ftick);
