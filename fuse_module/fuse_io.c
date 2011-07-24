@@ -99,6 +99,7 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
             DEBUG("direct write of vnode %ju via file handle %ju\n",
                 (uintmax_t)VTOILLU(vp), (uintmax_t)fufh->fh_id);
             err = fuse_write_directbackend(vp, uio, cred, fufh);
+	    fuse_invalidate_attr(vp);
         } else {
             DEBUG("buffered write of vnode %ju\n", (uintmax_t)VTOILLU(vp));
             err = fuse_write_biobackend(vp, uio, cred, fufh);
@@ -107,8 +108,6 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
     default:
         panic("uninterpreted mode passed to fuse_io_dispatch");
     }
-
-    fuse_invalidate_attr(vp);
 
     return (err);
 }

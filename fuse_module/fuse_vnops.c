@@ -1262,8 +1262,6 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
             FUSE_OP_FOREGROUNDED);
     }
 
-    fuse_invalidate_attr(vp);
-
     return err;
 }
 
@@ -1309,8 +1307,6 @@ fuse_vnop_readlink(struct vop_readlink_args *ap)
     if (!err) {
         err = uiomove(fdi.answ, fdi.iosize, uio);
     }
-
-    fuse_invalidate_attr(vp);
 
 out:
     fdisp_destroy(&fdi);
