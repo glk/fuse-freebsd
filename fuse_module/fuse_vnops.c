@@ -334,7 +334,7 @@ bringup:
         goto out;
     }
 
-    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, VREG, /*size*/0);
+    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, VREG);
     if (err) {
        if (gone_good_old) {
            fuse_internal_forget_send(mp, td, cred, feo->nodeid, 1);
@@ -644,7 +644,6 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
     int err                   = 0;
     int lookup_err            = 0;
     struct vnode *vp          = NULL;
-    uint64_t size             = 0;
 
     struct fuse_dispatcher fdi;
     enum   fuse_opcode     op;
@@ -730,7 +729,6 @@ calldaemon:
 
     if ((op == FUSE_LOOKUP) && !lookup_err) { /* lookup call succeeded */
         nid = ((struct fuse_entry_out *)fdi.answ)->nodeid;
-        size = ((struct fuse_entry_out *)fdi.answ)->attr.size;
         if (!nid) {
             /*
              * zero nodeid is the same as "not found",
@@ -844,8 +842,7 @@ calldaemon:
                                  dvp,
                                  &vp,
                                  cnp,
-                                 IFTOVT(fattr->mode),
-                                 size);
+                                 IFTOVT(fattr->mode));
             if (err) {
                 goto out;
             }
@@ -883,8 +880,7 @@ calldaemon:
                                  dvp,
                                  &vp,
                                  cnp,
-                                 IFTOVT(fattr->mode),
-                                 size);
+                                 IFTOVT(fattr->mode));
             if (err) {
                 goto out;
             }
@@ -908,8 +904,7 @@ calldaemon:
                                  NULL,
                                  &vp,
                                  cnp,
-                                 IFTOVT(fattr->mode),
-                                 0);
+                                 IFTOVT(fattr->mode));
             vn_lock(dvp, ltype | LK_RETRY);
             vref(vp);
             *vpp = vp;
@@ -922,8 +917,7 @@ calldaemon:
                                  dvp,
                                  &vp,
                                  cnp,
-                                 IFTOVT(fattr->mode),
-                                 size);
+                                 IFTOVT(fattr->mode));
             if (err) {
                 goto out;
             }

@@ -170,8 +170,7 @@ fuse_vnode_get(struct mount         *mp,
                struct vnode         *dvp,
                struct vnode         **vpp,
                struct componentname *cnp,
-               enum vtype            vtyp,
-               uint64_t              size)
+               enum vtype            vtyp)
 {
     struct thread *td = (cnp != NULL ? cnp->cn_thread : curthread);
     int err = 0;

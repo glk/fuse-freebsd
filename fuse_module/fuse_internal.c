@@ -486,7 +486,7 @@ fuse_internal_newentry_core(struct vnode *dvp,
         return err;
     }
 
-    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, vtyp, 0);
+    err = fuse_vnode_get(mp, feo->nodeid, dvp, vpp, cnp, vtyp);
     if (err) {
         fuse_internal_forget_send(mp, cnp->cn_thread, cnp->cn_cred,
             feo->nodeid, 1);

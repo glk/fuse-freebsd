@@ -88,8 +88,7 @@ int fuse_vnode_get(struct mount         *mp,
                    struct vnode         *dvp,
                    struct vnode        **vpp,
                    struct componentname *cnp,
-                   enum vtype            vtyp,
-                   uint64_t              size);
+                   enum vtype            vtyp);
 
 void fuse_vnode_open(struct vnode *vp,
                      int32_t fuse_open_flags,
