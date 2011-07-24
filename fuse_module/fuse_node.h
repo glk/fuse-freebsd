@@ -48,6 +48,7 @@ struct fuse_vnode_data {
 
 extern struct vop_vector fuse_vnops;
 extern int fuse_data_cache_enable;
+extern int fuse_data_cache_invalidate;
 extern int fuse_mmap_enable;
 extern int fuse_sync_resize;
 

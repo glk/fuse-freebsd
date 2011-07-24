@@ -546,21 +546,22 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
     struct fuse_vnode_data *fvdat = VTOFUD(vp);
     struct fuse_filehandle *fufh = NULL;
 
-    int type, need_invalbuf = 1;
+    int type, need_flush = 1;
 
     DEBUG("inode=%jd\n", (uintmax_t)VTOI(vp));
 
     for (type = 0; type < FUFH_MAXTYPE; type++) {
         fufh = &(fvdat->fufh[type]);
         if (FUFH_IS_VALID(fufh)) {
-            if (need_invalbuf) {
+            if (need_flush) {
                 if ((VTOFUD(vp)->flag & FN_SIZECHANGE) != 0) {
-                    printf("FUSE: Delayed file size change for inactive vnode "
-                            "%jd\n", VTOI(vp));
                     fuse_vnode_savesize(vp, NULL);
                 }
-                fuse_io_invalbuf(vp, td);
-                need_invalbuf = 0;
+                if (fuse_data_cache_invalidate)
+                    fuse_io_invalbuf(vp, td);
+                else
+                    fuse_io_flushbuf(vp, MNT_WAIT, td);
+                need_flush = 0;
             }
             fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_BACKGROUNDED);
         }

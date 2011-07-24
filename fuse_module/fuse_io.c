@@ -670,6 +670,18 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp)
     return (error);
 }
 
+int
+fuse_io_flushbuf(struct vnode *vp, int waitfor, struct thread *td)
+{
+	struct vop_fsync_args a = {
+		.a_vp = vp,
+		.a_waitfor = waitfor,
+		.a_td = td,
+	};
+
+	return (vop_stdfsync(&a));
+}
+
 /*
  * Flush and invalidate all dirty buffers. If another process is already
  * doing the flush, just wait for completion.
