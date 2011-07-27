@@ -209,11 +209,12 @@ fuse_vfsop_mount(struct mount *mp)
     if (vfs_scanopt(opts, "max_read=", "%u", &max_read) == 1)
     max_read_set = 1;
     if (vfs_scanopt(opts, "timeout=", "%u", &daemon_timeout) == 1) {
-	    if (daemon_timeout < FUSE_MIN_DAEMON_TIMEOUT)
-		    daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
-	    else if (daemon_timeout > FUSE_MAX_DAEMON_TIMEOUT)
-		    daemon_timeout = FUSE_MAX_DAEMON_TIMEOUT;
-	    data->daemon_timeout = daemon_timeout;
+        if (daemon_timeout < FUSE_MIN_DAEMON_TIMEOUT)
+            daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
+        else if (daemon_timeout > FUSE_MAX_DAEMON_TIMEOUT)
+            daemon_timeout = FUSE_MAX_DAEMON_TIMEOUT;
+    } else {
+        daemon_timeout = FUSE_DEFAULT_DAEMON_TIMEOUT;
     }
     subtype = vfs_getopts(opts, "subtype=", &err);
     err = 0;
@@ -259,6 +260,7 @@ fuse_vfsop_mount(struct mount *mp)
     data->mp = mp;
     data->dataflags |= mntopts;
     data->max_read = max_read;
+    data->daemon_timeout = daemon_timeout;
 #ifdef XXXIP
     if (!priv_check(td, PRIV_VFS_FUSE_SYNC_UNMOUNT))
         data->dataflags |= FSESS_CAN_SYNC_UNMOUNT;
