@@ -7,7 +7,7 @@ NO_MANCOMPRESS?= yes
 
 # mount_fusefs needs mntopts.h and getmntopts.c from src/sbin/mount/
 MOUNT?=	/usr/src/sbin/mount
-CFLAGS+= -I${MOUNT} -I../fuse_module
+CFLAGS+= -I${MOUNT} -I../fuse
 .PATH: ${MOUNT}
 
 .include <bsd.prog.mk>

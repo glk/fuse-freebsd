@@ -1,4 +1,4 @@
-SUBDIR = fuse_module mount_fusefs
+SUBDIR = fuse mount_fusefs
                                 
 .include <bsd.subdir.mk>
 
