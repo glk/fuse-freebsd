@@ -101,8 +101,7 @@ int
 fuse_filehandle_close(struct vnode *vp,
                       fufh_type_t fufh_type,
                       struct thread *td,
-                      struct ucred *cred,
-                      fuse_op_waitfor_t waitfor)
+                      struct ucred *cred)
 {
     struct fuse_dispatcher  fdi;
     struct fuse_release_in *fri;
@@ -138,12 +137,7 @@ fuse_filehandle_close(struct vnode *vp,
     fri->fh = fufh->fh_id;
     fri->flags = fuse_filehandle_xlate_to_oflags(fufh_type);
 
-    if (waitfor == FUSE_OP_FOREGROUNDED) {
-        err = fdisp_wait_answ(&fdi);
-    } else {
-        fuse_insert_callback(fdi.tick, NULL);
-        fuse_insert_message(fdi.tick);
-    }
+    err = fdisp_wait_answ(&fdi);
     fdisp_destroy(&fdi);
 
 out:

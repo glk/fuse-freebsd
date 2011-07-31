@@ -96,7 +96,6 @@ int fuse_filehandle_open(struct vnode *vp, fufh_type_t fufh_type,
                          struct fuse_filehandle **fufhp, struct thread *td,
                          struct ucred *cred);
 int fuse_filehandle_close(struct vnode *vp, fufh_type_t fufh_type,
-                          struct thread *td, struct ucred *cred,
-                          fuse_op_waitfor_t waitfor);
+                          struct thread *td, struct ucred *cred);
 
 #endif /* _FUSE_FILE_H_ */
