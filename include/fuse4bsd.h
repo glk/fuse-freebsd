@@ -1,3 +1,0 @@
-#ifndef FUSE4BSD_VERSION
-#define FUSE4BSD_VERSION "0.4.2"
-#endif

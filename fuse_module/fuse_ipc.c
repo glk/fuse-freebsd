@@ -3,8 +3,6 @@
  * Amit Singh <singh@>
  */
 
-#include "config.h"
-
 #include <sys/types.h>
 #include <sys/module.h>
 #include <sys/systm.h>
@@ -51,8 +49,8 @@ static __inline__ void fuse_setup_ihead(struct fuse_in_header *ihead,
 static fuse_handler_t  fuse_standard_handler;
 
 SYSCTL_NODE(_vfs, OID_AUTO, fuse, CTLFLAG_RW, 0, "FUSE tunables");
-SYSCTL_STRING(_vfs_fuse, OID_AUTO, fuse4bsd_version, CTLFLAG_RD,
-              FUSE4BSD_VERSION, 0, "fuse4bsd version");
+SYSCTL_STRING(_vfs_fuse, OID_AUTO, version, CTLFLAG_RD,
+              FUSE_FREEBSD_VERSION, 0, "fuse-freebsd version");
 static int fuse_ticket_count = 0;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, ticket_count, CTLFLAG_RW,
             &fuse_ticket_count, 0, "number of allocated tickets");

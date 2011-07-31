@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2005 Jean-Sébastien Pédron
- * Copyright (c) 2005 Csaba Henk 
+ * Copyright (c) 2005 Csaba Henk
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,13 +46,14 @@
 #include <limits.h>
 #include <paths.h>
 
-#include "fuse4bsd.h"
+#include "fuse_version.h"
 #include "mntopts.h"
 
-void	__usage_short(void);
+void	usage_short(void);
 void	usage(void);
 void	helpmsg(void);
 void	showversion(void);
+int	init_backgrounded(void);
 
 struct mntopt mopts[] = {
 	#define ALTF_PRIVATE 0x01
@@ -92,8 +93,6 @@ struct mntval mvals[] = {
 	{ 0, NULL, 0 }
 };
 
-char *progname;
-
 #define DEFAULT_MOUNT_FLAGS ALTF_PRIVATE | ALTF_SYNC_UNMOUNT
 
 int
@@ -125,8 +124,6 @@ main(int argc, char *argv[])
 	int fd = -1, fdx;
 	char *ep;
 	char *daemon = NULL, *daemon_opts = NULL;
-
-	progname = argv[0];
 
 	/*
 	 * We want a parsing routine which is not sensitive to
@@ -215,7 +212,7 @@ main(int argc, char *argv[])
 				errx(1, "mount path specified inconsistently");
 			diro = optarg;
 			break;
-		case 'v': 
+		case 'v':
 			verbose = 1;
 			break;
 		case 'h':
@@ -232,7 +229,8 @@ main(int argc, char *argv[])
 		}
 		if (done)
 			break;
-	} while ((ch = getopt_long(argc, argv, "AvVho:SD:O:s:m:", longopts, NULL)) != -1);
+	} while ((ch = getopt_long(argc, argv, "AvVho:SD:O:s:m:", longopts,
+	    NULL)) != -1);
 
 	argc -= optind;
 	argv += optind;
@@ -242,7 +240,8 @@ main(int argc, char *argv[])
 			errx(1, "special specified inconsistently");
 		dev = devo;
 	} else if (diro)
-		errx(1, "if mountpoint is given via an option, special should also be given via an option"); 
+		errx(1, "if mountpoint is given via an option, "
+		    "special should also be given via an option");
 
 	if (diro) {
 		if (dir)
@@ -275,19 +274,22 @@ main(int argc, char *argv[])
 				 * negative of allow_other: if this is set,
 				 * allow_other is blocked, period.
 				 */
-				errx(1, "\"allow_other\" usage is banned by respective option");
+				errx(1, "\"allow_other\" usage is banned by "
+				    "respective option");
 
 			for (mv = mvals; mv->mv_flag; ++mv) {
 				if (mo->m_flag != mv->mv_flag)
 					continue;
 				if (mv->mv_value) {
-					build_iovec(&iov, &iovlen, mo->m_option, mv->mv_value, mv->mv_len);
+					build_iovec(&iov, &iovlen, mo->m_option,
+					    mv->mv_value, mv->mv_len);
 					iov_done = 1;
 					break;
 				}
 			}
 			if (! iov_done)
-				build_iovec(&iov, &iovlen, mo->m_option, "", -1);
+				build_iovec(&iov, &iovlen, mo->m_option,
+				    "", -1);
 		}
 		if (__altflags & mo->m_flag) {
 			char *uscore_opt;
@@ -320,7 +322,8 @@ main(int argc, char *argv[])
 
 	if (strcmp(dev, "/dev/fuse") == 0) {
 		if (! (argc > 0 || daemon)) {
-			fprintf(stderr, "Please also specify the fuse daemon to run when mounting via the multiplexer!\n");
+			fprintf(stderr, "Please also specify the fuse daemon "
+			    "to run when mounting via the multiplexer!\n");
 			usage();
 		}
 		if ((fd = open(dev, O_RDWR)) < 0)
@@ -359,7 +362,7 @@ main(int argc, char *argv[])
 
 		if (fd < 0 && (fd = open(dev, O_RDWR)) < 0)
 			err(1, "failed to open fuse device");
-	
+
 		if (asprintf(&fds, "%d", fd) == -1)
 			err(1, "failed to allocate memory");
 		setenv("FUSE_DEV_FD", fds, 1);
@@ -419,10 +422,11 @@ main(int argc, char *argv[])
 }
 
 void
-__usage_short(void) {
+usage_short(void) {
 	fprintf(stderr,
-	    "usage:\n%s [-A|-S|-v|-V|-h|-D daemon|-O args|-s special|-m node|-o option...] special node [daemon args...]\n\n",
-	    basename(progname));
+	    "usage:\n%s [-A|-S|-v|-V|-h|-D daemon|-O args|-s special|-m node|"
+	    "-o option...] special node [daemon args...]\n\n",
+	    basename(getprogname()));
 }
 
 void
@@ -430,13 +434,13 @@ usage(void)
 {
 	struct mntopt *mo;
 
-	__usage_short();
+	usage_short();
 
 	fprintf(stderr, "known options:\n");
 	for (mo = mopts; mo->m_flag; ++mo)
 		fprintf(stderr, "\t%s\n", mo->m_option);
 
-	fprintf(stderr, "\n(use -h for a detailed description of these options)\n");
+	fprintf(stderr, "\n(use -h for a detailed description of options)\n");
 	exit(EX_USAGE);
 }
 
@@ -444,7 +448,7 @@ void
 helpmsg(void)
 {
 	if (! getenv("MOUNT_FUSEFS_CALL_BY_LIB")) {
-		__usage_short();
+		usage_short();
 		fprintf(stderr, "description of options:\n");
 	}
 
@@ -465,7 +469,7 @@ helpmsg(void)
 	        "    -o max_read=N          set maximum size of read requests\n"
 	        "    -o noprivate           allow secondary mounting of the filesystem\n"
 	        "    -o neglect_shares      don't report EBUSY when unmount attempted\n"
-	        "                           in presence of secondary mounts\n" 
+	        "                           in presence of secondary mounts\n"
 	        "    -o push_symlinks_in    prefix absolute symlinks with mountpoint\n"
 	        "    -o sync_unmount        do unmount synchronously\n"
 	        );
@@ -475,7 +479,7 @@ helpmsg(void)
 void
 showversion(void)
 {
-	puts("mount_fusefs [fuse4bsd] version: " FUSE4BSD_VERSION);
+	puts("mount_fusefs fuse-freebsd version: " FUSE_FREEBSD_VERSION);
 	exit(EX_USAGE);
 }
 

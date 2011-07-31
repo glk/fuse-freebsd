@@ -3,7 +3,7 @@
  * and debugging.
  */
 
-#include "fuse4bsd.h"
+#include "fuse_version.h"
 #include "fuse_kernel.h"
 
 #define FUSE_DEFAULT_DAEMON_TIMEOUT                60     /* s */

@@ -1,0 +1,3 @@
+#ifndef FUSE_FREEBSD_VERSION
+#define FUSE_FREEBSD_VERSION	"0.4.2"
+#endif

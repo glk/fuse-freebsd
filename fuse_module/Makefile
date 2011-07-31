@@ -1,6 +1,4 @@
-.undef KERNCONF
-
-.include "../Makefile.common"
+KMOD=	fuse
 
 SRCS=	fuse.h		\
 	fuse_kernel.h	\
@@ -20,20 +18,7 @@ SRCS=	fuse.h		\
 	fuse_vnops.c	\
 	vnode_if.h
 
-CFLAGS+= -I../include
 DEBUG_FLAGS+= -g
-# -DFUSE_DEBUG_VNOPS=1
-
-.if defined(KERNCONF)
-KERNCONF1!= echo ${KERNCONF} | sed -e 's/ .*//g'
-KRNLOBJDIR!=	make -C /usr/src -f /usr/src/Makefile.inc1 -V KRNLOBJDIR
-KERNCONFDIR= ${KRNLOBJDIR}/${KERNCONF1}
-.endif
-
-.if defined(KERNCONFDIR)
-CFLAGS+= -DKERNCONFDIR="\"${KERNCONFDIR}\"" -I${KERNCONFDIR}
-.endif
-
-KMOD=fuse
+# -DFUSE_DEBUG_VNOPS=1 -DFUSE_DEBUG_IPC=1 -DFUSE_DEBUG_VFSOPS=1
 
 .include <bsd.kmod.mk>

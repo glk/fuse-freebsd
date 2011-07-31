@@ -2,8 +2,6 @@
  * Module load/unload stuff.
  */
 
-#include "config.h"
-
 #include <sys/types.h>
 #include <sys/module.h>
 #include <sys/systm.h>
@@ -92,13 +90,9 @@ fuse_loader(struct module *m, int what, void *arg)
 		if ((err = vfs_modevent(NULL, what, &fuse_vfsconf)))
 			fuse_bringdown(eh_tag);
 		else
-			printf("fuse4bsd: version %s, FUSE ABI %d.%d\n"
-#ifdef KERNCONFDIR
-			       "fuse4bsd: compiled against kernel config "
-			       KERNCONFDIR "\n"
-#endif
-			       , FUSE4BSD_VERSION,
-			       FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
+			printf("fuse-freebsd: version %s, FUSE ABI %d.%d\n",
+			    FUSE_FREEBSD_VERSION,
+			    FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
 
 		break;
 	case MOD_UNLOAD:

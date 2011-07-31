@@ -2,8 +2,6 @@
  * I/O methods for fuse devices.
  */
 
-#include "config.h"
-
 #include <sys/types.h>
 #include <sys/module.h>
 #include <sys/systm.h>
