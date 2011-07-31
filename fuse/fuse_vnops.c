@@ -935,9 +935,7 @@ calldaemon:
             if (err) {
                 goto out;
             }
-            if (vnode_vtype(vp) == VDIR) {
-                fuse_vnode_setparent(vp, dvp);
-            }
+            fuse_vnode_setparent(vp, dvp);
             *vpp = vp;
         }
 
@@ -1349,6 +1347,7 @@ fuse_vnop_reclaim(struct vop_reclaim_args *ap)
                                   fvdat->nlookup);
     }
 
+    fuse_vnode_setparent(vp, NULL);
     cache_purge(vp);
     vfs_hash_remove(vp);
     vnode_destroy_vobject(vp);
@@ -1449,13 +1448,15 @@ fuse_vnop_rename(struct vop_rename_args *ap)
     if (err == 0) {
         fuse_invalidate_attr(fdvp);
         if (tdvp != fdvp) {
+            fuse_vnode_setparent(fvp, tdvp);
             fuse_invalidate_attr(tdvp);
         }
+        if (tvp != NULL)
+            fuse_vnode_setparent(tvp, NULL);
     }
     sx_unlock(&data->rename_lock);
 
     if (tvp != NULL && tvp != fvp) {
-        fuse_vnode_setparent(tvp, tdvp);
         cache_purge(tvp);
     }
 

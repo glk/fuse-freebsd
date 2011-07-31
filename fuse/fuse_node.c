@@ -192,7 +192,7 @@ fuse_vnode_get(struct mount         *mp,
         return err;
     }
 
-    if (dvp != NULL && vnode_vtype(*vpp) == VDIR) {
+    if (dvp != NULL) {
         MPASS((cnp->cn_flags & ISDOTDOT) == 0);
         MPASS(!(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'));
         fuse_vnode_setparent(*vpp, dvp);

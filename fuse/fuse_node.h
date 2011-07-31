@@ -76,7 +76,7 @@ fuse_vnode_mmap_enable(struct vnode *vp)
 static __inline void
 fuse_vnode_setparent(struct vnode *vp, struct vnode *dvp)
 {
-    if (vp->v_type == VDIR) {
+    if (dvp != NULL && vp->v_type == VDIR) {
         MPASS(dvp->v_type == VDIR);
         VTOFUD(vp)->parent_nid = VTOI(dvp);
     }
