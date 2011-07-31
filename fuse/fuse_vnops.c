@@ -1415,6 +1415,7 @@ fuse_vnop_rename(struct vop_rename_args *ap)
     struct vnode *tdvp         = ap->a_tdvp;
     struct vnode *tvp          = ap->a_tvp;
     struct componentname *tcnp = ap->a_tcnp;
+    struct fuse_data *data;
 
     int err = 0;
 
@@ -1442,14 +1443,16 @@ fuse_vnop_rename(struct vop_rename_args *ap)
      * under the source directory in the file system tree.
      * Linux performs this check at VFS level.
      */
+    data = fuse_get_mpdata(vnode_mount(tdvp));
+    sx_xlock(&data->rename_lock);
     err = fuse_internal_rename(fdvp, fcnp, tdvp, tcnp);
-
     if (err == 0) {
         fuse_invalidate_attr(fdvp);
         if (tdvp != fdvp) {
             fuse_invalidate_attr(tdvp);
         }
     }
+    sx_unlock(&data->rename_lock);
 
     if (tvp != NULL && tvp != fvp) {
         fuse_vnode_setparent(tvp, tdvp);

@@ -346,10 +346,7 @@ fdata_alloc(struct cdev *fdev, struct ucred *cred)
     TAILQ_INIT(&data->aw_head);
     data->daemoncred = crhold(cred);
     data->daemon_timeout = FUSE_DEFAULT_DAEMON_TIMEOUT;
-
-#ifdef FUSE_EXPLICIT_RENAME_LOCK
     sx_init(&data->rename_lock, "fuse rename lock");
-#endif
 
     return data;
 }
@@ -376,9 +373,7 @@ fdata_trydestroy(struct fuse_data *data)
     /* Driving off stage all that stuff thrown at device... */
     mtx_destroy(&data->ms_mtx);
     mtx_destroy(&data->aw_mtx);
-#ifdef FUSE_EXPLICIT_RENAME_LOCK
     sx_destroy(&data->rename_lock);
-#endif
 
     crfree(data->daemoncred);
 

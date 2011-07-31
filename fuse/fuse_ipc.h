@@ -138,9 +138,7 @@ struct fuse_data {
 
     u_long                     ticketer;
 
-#ifdef FUSE_EXPLICIT_RENAME_LOCK
     struct sx                  rename_lock;
-#endif
 
     uint32_t                   fuse_libabi_major;
     uint32_t                   fuse_libabi_minor;
