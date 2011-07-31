@@ -122,6 +122,10 @@ int fuse_lookup_cache_enable = 1;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, lookup_cache_enable, CTLFLAG_RW,
            &fuse_lookup_cache_enable, 0, "");
 
+static int fuse_reclaim_revoked = 1;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, reclaim_revoked, CTLFLAG_RW,
+           &fuse_reclaim_revoked, 0, "");
+
 int fuse_pbuf_freecnt = -1;
 
 #if __FreeBSD_version >= 900011
@@ -551,11 +555,12 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
     for (type = 0; type < FUFH_MAXTYPE; type++) {
         fufh = &(fvdat->fufh[type]);
         if (FUFH_IS_VALID(fufh)) {
-            if (need_flush) {
+            if (need_flush && vp->v_type == VREG) {
                 if ((VTOFUD(vp)->flag & FN_SIZECHANGE) != 0) {
                     fuse_vnode_savesize(vp, NULL);
                 }
-                if (fuse_data_cache_invalidate)
+                if (fuse_data_cache_invalidate ||
+                        (fvdat->flag & FN_REVOKED) != 0)
                     fuse_io_invalbuf(vp, td);
                 else
                     fuse_io_flushbuf(vp, MNT_WAIT, td);
@@ -565,7 +570,7 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
         }
     }
 
-    if ((fvdat->flag & FN_REVOKED) != 0) {
+    if ((fvdat->flag & FN_REVOKED) != 0 && fuse_reclaim_revoked) {
         vrecycle(vp, td);
     }
 
