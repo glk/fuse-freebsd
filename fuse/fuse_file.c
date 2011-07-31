@@ -50,11 +50,11 @@ fuse_filehandle_open(struct vnode *vp,
     int oflags = 0;
     int op     = FUSE_OPEN;
 
-    fuse_trace_printf("fuse_filehandle_get(vp=%p, fufh_type=%d)\n",
+    fuse_trace_printf("fuse_filehandle_open(vp=%p, fufh_type=%d)\n",
                       vp, fufh_type);
 
     if (fuse_filehandle_valid(vp, fufh_type)) {
-        panic("FUSE: filehandle_get called despite valid fufh (type=%d)",
+        panic("FUSE: filehandle_open called despite valid fufh (type=%d)",
               fufh_type);
         /* NOTREACHED */
     }
@@ -173,10 +173,8 @@ fuse_filehandle_get(struct vnode *vp, fufh_type_t fufh_type,
     struct fuse_filehandle *fufh;
 
     fufh = &(fvdat->fufh[fufh_type]);
-    if (!FUFH_IS_VALID(fufh)) {
-        printf("FUSE: filehandle is not valid (type=%d)\n", fufh_type);
+    if (!FUFH_IS_VALID(fufh))
 	return EBADF;
-    }
     if (fufhp != NULL)
         *fufhp = fufh;
     return 0;

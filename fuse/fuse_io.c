@@ -65,7 +65,7 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
     err = fuse_filehandle_getrw(vp,
         (uio->uio_rw == UIO_READ) ? FUFH_RDONLY : FUFH_WRONLY, &fufh);
     if (err) {
-        DEBUG("fetching filehandle failed\n");
+        printf("FUSE: io dispatch: filehandles are closed\n");
         return err;
     }
 
@@ -562,7 +562,7 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp)
     error = fuse_filehandle_getrw(vp,
 	(bp->b_iocmd == BIO_READ) ? FUFH_RDONLY : FUFH_WRONLY, &fufh);
     if (error) {
-        DEBUG("fetching filehandle failed\n");
+        printf("FUSE: strategy: filehandles are closed\n");
         bp->b_ioflags |= BIO_ERROR;
         bp->b_error = error;
         return (error);
