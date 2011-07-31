@@ -566,7 +566,7 @@ fuse_vnop_inactive(struct vop_inactive_args *ap)
                     fuse_io_flushbuf(vp, MNT_WAIT, td);
                 need_flush = 0;
             }
-            fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_BACKGROUNDED);
+            fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_FOREGROUNDED);
         }
     }
 
@@ -1343,7 +1343,7 @@ fuse_vnop_reclaim(struct vop_reclaim_args *ap)
         if (FUFH_IS_VALID(fufh)) {
             printf("FUSE: vnode being reclaimed but fufh (type=%d) is valid",
                 type);
-            fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_BACKGROUNDED);
+            fuse_filehandle_close(vp, type, td, NULL, FUSE_OP_FOREGROUNDED);
         }
     }
 
