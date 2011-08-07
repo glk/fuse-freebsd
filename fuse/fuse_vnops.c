@@ -208,7 +208,6 @@ fuse_vnop_close(struct vop_close_args *ap)
     struct vnode *vp      = ap->a_vp;
     struct ucred *cred    = ap->a_cred;
     int           fflag   = ap->a_fflag;
-    int isdir = (vnode_isdir(vp)) ? 1 : 0;
     fufh_type_t fufh_type;
 
     fuse_trace_printf_vnop();
@@ -217,15 +216,18 @@ fuse_vnop_close(struct vop_close_args *ap)
         return 0;
     }
 
+    if (vnode_isdir(vp)) {
+        if (fuse_filehandle_valid(vp, FUFH_RDONLY)) {
+            fuse_filehandle_close(vp, FUFH_RDONLY, NULL, cred);
+        }
+        return 0;
+    }
+
     if (fflag & IO_NDELAY) {
         return 0;
     }
 
-    if (isdir) {
-        fufh_type = FUFH_RDONLY;
-    } else {
-        fufh_type = fuse_filehandle_xlate_from_fflags(fflag);
-    }
+    fufh_type = fuse_filehandle_xlate_from_fflags(fflag);
 
     if (!fuse_filehandle_valid(vp, fufh_type)) {
         int i;
