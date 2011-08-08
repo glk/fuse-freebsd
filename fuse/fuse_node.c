@@ -63,6 +63,10 @@ int fuse_sync_resize = 1;
 SYSCTL_INT(_vfs_fuse, OID_AUTO, sync_resize, CTLFLAG_RW,
            &fuse_sync_resize, 0, "");
 
+int fuse_fix_broken_io = 0;
+SYSCTL_INT(_vfs_fuse, OID_AUTO, fix_broken_io, CTLFLAG_RW,
+           &fuse_fix_broken_io, 0, "");
+
 static void
 fuse_vnode_init(struct vnode *vp, struct fuse_vnode_data *fvdat,
     uint64_t nodeid, enum vtype vtyp)
