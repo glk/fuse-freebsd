@@ -79,7 +79,7 @@ fuse_io_dispatch(struct vnode *vp, struct uio *uio, int ioflag,
      * we hardwire it into the file's private data (similarly to Linux,
      * btw.).
      */
-    directio = (ioflag & IO_DIRECT) || !fuse_vnode_cache_enable(vp);
+    directio = (ioflag & IO_DIRECT) || !fsess_opt_datacache(vnode_mount(vp));
 
     switch (uio->uio_rw) {
     case UIO_READ:
@@ -594,7 +594,7 @@ fuse_io_strategy(struct vnode *vp, struct buf *bp)
         error = fuse_read_directbackend(vp, uiop, cred, fufh);
 
         if ((!error && uiop->uio_resid) ||
-            (fuse_vnode_fix_broken_io(vp) && error == EIO &&
+            (fsess_opt_brokenio(vnode_mount(vp)) && error == EIO &&
             uiop->uio_offset < fvdat->filesize && fvdat->filesize > 0 &&
             uiop->uio_offset >= fvdat->cached_attrs.va_size)) {
             /*

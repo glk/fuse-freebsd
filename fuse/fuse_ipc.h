@@ -156,17 +156,23 @@ struct fuse_data {
 
 #define FSESS_DEAD                0x0001 // session is to be closed
 #define FSESS_OPENED              0x0002 // session device has been opened
-#define FSESS_INITED              0x0040 // session has been inited
-#define FSESS_DAEMON_CAN_SPY      0x0080 // let non-owners access this fs
+#define FSESS_INITED              0x0004 // session has been inited
+#define FSESS_DAEMON_CAN_SPY      0x0010 // let non-owners access this fs
                                          // (and being observed by the daemon)
-#define FSESS_NEGLECT_SHARES      0x0100 // presence of secondary mount is not
-                                         // considered as "fs is busy"
-#define FSESS_PRIVATE             0x0200 // don't allow secondary mounts
-#define FSESS_PUSH_SYMLINKS_IN    0x0400 // prefix absolute symlinks with mp
-#define FSESS_DEFAULT_PERMISSIONS 0x0800 // kernel does permission checking
-#define FSESS_NO_ATTRCACHE        0x1000 // no attribute caching
-#define FSESS_NO_READAHEAD        0x2000 // no readaheads
-#define FSESS_NO_UBC              0x4000 // no caching
+#define FSESS_PUSH_SYMLINKS_IN    0x0020 // prefix absolute symlinks with mp
+#define FSESS_DEFAULT_PERMISSIONS 0x0040 // kernel does permission checking
+#define FSESS_NO_ATTRCACHE        0x0080 // no attribute caching
+#define FSESS_NO_READAHEAD        0x0100 // no readaheads
+#define FSESS_NO_DATACACHE        0x0200 // disable buffer cache
+#define FSESS_NO_NAMECACHE        0x0400 // disable name cache
+#define FSESS_NO_MMAP             0x0800 // disable mmap
+#define FSESS_BROKENIO            0x1000 // fix broken io
+
+extern int fuse_data_cache_enable;
+extern int fuse_data_cache_invalidate;
+extern int fuse_mmap_enable;
+extern int fuse_sync_resize;
+extern int fuse_fix_broken_io;
 
 static __inline__
 struct fuse_data *
@@ -180,6 +186,49 @@ struct fuse_data *
 fuse_get_mpdata(struct mount *mp)
 {
     return mp->mnt_data;
+}
+
+static __inline int
+fsess_isimpl(struct mount *mp, int opcode)
+{
+    struct fuse_data *data = fuse_get_mpdata(mp);
+
+    return (data->notimpl & (1ULL << opcode)) == 0;
+
+}
+static __inline void
+fsess_set_notimpl(struct mount *mp, int opcode)
+{
+    struct fuse_data *data = fuse_get_mpdata(mp);
+
+    data->notimpl |= (1ULL << opcode);
+}
+
+static __inline int
+fsess_opt_datacache(struct mount *mp)
+{
+    struct fuse_data *data = fuse_get_mpdata(mp);
+
+    return (fuse_data_cache_enable ||
+        (data->dataflags & FSESS_NO_DATACACHE) == 0);
+}
+
+static __inline int
+fsess_opt_mmap(struct mount *mp)
+{
+    struct fuse_data *data = fuse_get_mpdata(mp);
+
+    if (!(fuse_mmap_enable && fuse_data_cache_enable))
+        return 0;
+    return ((data->dataflags & (FSESS_NO_DATACACHE | FSESS_NO_MMAP)) == 0);
+}
+
+static __inline int
+fsess_opt_brokenio(struct mount *mp)
+{
+    struct fuse_data *data = fuse_get_mpdata(mp);
+
+    return (fuse_fix_broken_io || (data->dataflags & FSESS_BROKENIO));
 }
 
 static __inline__

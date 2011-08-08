@@ -47,11 +47,6 @@ struct fuse_vnode_data {
 #define FUSE_NULL_ID 0
 
 extern struct vop_vector fuse_vnops;
-extern int fuse_data_cache_enable;
-extern int fuse_data_cache_invalidate;
-extern int fuse_mmap_enable;
-extern int fuse_sync_resize;
-extern int fuse_fix_broken_io;
 
 static __inline__
 void
@@ -60,24 +55,6 @@ fuse_invalidate_attr(struct vnode *vp)
     if (VTOFUD(vp)) {
         bzero(&VTOFUD(vp)->cached_attrs_valid, sizeof(struct timespec));
     }
-}
-
-static __inline int
-fuse_vnode_cache_enable(struct vnode *vp)
-{
-    return (fuse_data_cache_enable);
-}
-
-static __inline int
-fuse_vnode_mmap_enable(struct vnode *vp)
-{
-    return (fuse_mmap_enable && fuse_data_cache_enable);
-}
-
-static __inline int
-fuse_vnode_fix_broken_io(struct vnode *vp)
-{
-    return (fuse_fix_broken_io);
 }
 
 static __inline void

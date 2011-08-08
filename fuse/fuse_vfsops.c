@@ -193,16 +193,15 @@ fuse_vfsop_mount(struct mount *mp)
      * With the help of underscored options the mount program
      * can inform us from the flags it sets by default
      */
-    FUSE_FLAGOPT(private, FSESS_PRIVATE);
-    FUSE_FLAGOPT(neglect_shares, FSESS_NEGLECT_SHARES);
     FUSE_FLAGOPT(allow_other, FSESS_DAEMON_CAN_SPY);
     FUSE_FLAGOPT(push_symlinks_in, FSESS_PUSH_SYMLINKS_IN);
     FUSE_FLAGOPT(default_permissions, FSESS_DEFAULT_PERMISSIONS);
-#ifdef XXXIP
-#if FUSE_HAS_DESTROY
-    FUSE_FLAGOPT(sync_unmount, FSESS_SYNC_UNMOUNT);
-#endif
-#endif
+    FUSE_FLAGOPT(no_attrcache, FSESS_NO_ATTRCACHE);
+    FUSE_FLAGOPT(no_readahed, FSESS_NO_READAHEAD);
+    FUSE_FLAGOPT(no_datacache, FSESS_NO_DATACACHE);
+    FUSE_FLAGOPT(no_namecache, FSESS_NO_NAMECACHE);
+    FUSE_FLAGOPT(no_mmap, FSESS_NO_MMAP);
+    FUSE_FLAGOPT(brokenio, FSESS_BROKENIO);
 
     if (vfs_scanopt(opts, "max_read=", "%u", &max_read) == 1)
     max_read_set = 1;

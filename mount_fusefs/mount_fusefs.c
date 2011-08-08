@@ -77,6 +77,13 @@ struct mntopt mopts[] = {
 	{ "large_read",          0, 0x00, 1 },
 	/* "nonempty", just the first two chars are stripped off during parsing */
 	{ "nempty",              0, 0x00, 1 },
+	{ "no_attrcache",        0, 0x00, 1 },
+	{ "no_readahed",         0, 0x00, 1 },
+	{ "no_datacache",        0, 0x00, 1 },
+	{ "no_namecache",        0, 0x00, 1 },
+	{ "no_mmap",             0, 0x00, 1 },
+	{ "brokenio",            0, 0x00, 1 },
+
 	MOPT_STDOPTS,
 	MOPT_END
 };
