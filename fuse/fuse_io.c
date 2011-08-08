@@ -246,13 +246,12 @@ fuse_read_directbackend(struct vnode *vp, struct uio *uio,
 
         if ((err = uiomove(fdi.answ, MIN(fri->size, fdi.iosize), uio)))
             break;
-	if (fdi.iosize < fri->size)
-		break;
+        if (fdi.iosize < fri->size)
+            break;
     }
 
-    fdisp_destroy(&fdi);
-
 out:
+    fdisp_destroy(&fdi);
     return (err);
 }
 
