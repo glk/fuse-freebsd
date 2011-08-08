@@ -151,14 +151,11 @@ struct fuse_data {
     struct selinfo ks_rsel;
 
     int                        daemon_timeout;
+    uint64_t                   notimpl;
 };
 
 #define FSESS_DEAD                0x0001 // session is to be closed
 #define FSESS_OPENED              0x0002 // session device has been opened
-#define FSESS_NOFSYNC             0x0004 // daemon doesn't implement fsync
-#define FSESS_NOFSYNCDIR          0x0008 // daemon doesn't implement fsyncdir
-#define FSESS_NOACCESS            0x0010 // daemon doesn't implement access
-#define FSESS_NOCREATE            0x0020 // daemon doesn't implement create
 #define FSESS_INITED              0x0040 // session has been inited
 #define FSESS_DAEMON_CAN_SPY      0x0080 // let non-owners access this fs
                                          // (and being observed by the daemon)

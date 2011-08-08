@@ -286,15 +286,14 @@ fuse_vnop_create(struct vop_create_args *ap)
     bzero(&fdi, sizeof(fdi));
 
     // XXX: Will we ever want devices?
-    if ((vap->va_type != VREG) ||
-        fuse_get_mpdata(mp)->dataflags & FSESS_NOCREATE) {
+    if ((vap->va_type != VREG) || !fsess_isimpl(mp, FUSE_CREATE)) {
         goto good_old;
     }
 
     debug_printf("parent nid = %ju, mode = %x\n", (uintmax_t)parentnid, mode);
 
     fdisp_init(fdip, sizeof(*foi) + cnp->cn_namelen + 1);
-    if (fuse_get_mpdata(vnode_mount(dvp))->dataflags & FSESS_NOCREATE) {
+    if (!fsess_isimpl(mp, FUSE_CREATE)) {
         debug_printf("eh, daemon doesn't implement create?\n");
         goto good_old;
     }
@@ -313,7 +312,7 @@ fuse_vnop_create(struct vop_create_args *ap)
 
     if (err == ENOSYS) {
         debug_printf("create: got ENOSYS from daemon\n");
-        fuse_get_mpdata(vnode_mount(dvp))->dataflags |= FSESS_NOCREATE;
+        fsess_set_notimpl(mp, FUSE_CREATE);
         fdisp_destroy(fdip);
         goto good_old;
     } else if (err) {
@@ -423,8 +422,8 @@ fuse_vnop_fsync(struct vop_fsync_args *ap)
     if ((err = vop_stdfsync(ap)))
         return err;
 
-    if (!(fuse_get_mpdata(vnode_mount(vp))->dataflags &
-        (vnode_vtype(vp) == VDIR ? FSESS_NOFSYNCDIR : FSESS_NOFSYNC))) {
+    if (!fsess_isimpl(vnode_mount(vp),
+        (vnode_vtype(vp) == VDIR ? FUSE_FSYNCDIR : FUSE_FSYNC))) {
         goto out;
     }
 

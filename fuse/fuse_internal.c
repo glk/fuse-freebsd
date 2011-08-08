@@ -106,7 +106,7 @@ fuse_internal_access(struct vnode *vp,
 #endif
     }
 
-    if (fuse_get_mpdata(mp)->dataflags & FSESS_NOACCESS) {
+    if (!fsess_isimpl(mp, FUSE_ACCESS)) {
         // Let the kernel handle this.
         return 0;
     }
@@ -146,7 +146,7 @@ fuse_internal_access(struct vnode *vp,
     fdisp_destroy(&fdi);
 
     if (err == ENOSYS) {
-        fuse_get_mpdata(mp)->dataflags |= FSESS_NOACCESS;
+        fsess_set_notimpl(mp, FUSE_ACCESS);
         err = 0;
     }
 
@@ -161,8 +161,7 @@ fuse_internal_fsync_callback(struct fuse_ticket *tick, struct uio *uio)
     fuse_trace_printf_func();
 
     if (tick->tk_aw_ohead.error == ENOSYS) {
-        tick->tk_data->dataflags |= (fticket_opcode(tick) == FUSE_FSYNC) ?
-                                        FSESS_NOFSYNC : FSESS_NOFSYNCDIR;
+        fsess_set_notimpl(tick->tk_data->mp, fticket_opcode(tick));
     }
 
     return 0;
