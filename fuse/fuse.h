@@ -1,6 +1,7 @@
 /*
- * Just macros for switching some features on and off, some allover used macros
- * and debugging.
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
+ * See COPYRIGHT file for additional information.
  */
 
 #include "fuse_version.h"

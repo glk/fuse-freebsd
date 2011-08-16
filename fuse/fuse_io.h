@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
+ * See COPYRIGHT file for additional information.
+ */
+
 #ifndef _FUSE_IO_H_
 #define _FUSE_IO_H_
 

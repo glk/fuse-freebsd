@@ -1,6 +1,8 @@
 /*
- * Copyright (C) 2006-2008 Google. All Rights Reserved.
- * Amit Singh <singh@>
+ * Copyright (C) 2006-2008 Google. Amit Singh <singh@>
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
+ * See COPYRIGHT file for additional information.
  */
 
 #ifndef _FUSE_IPC_H_

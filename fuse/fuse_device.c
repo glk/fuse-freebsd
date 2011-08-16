@@ -1,5 +1,7 @@
 /*
- * I/O methods for fuse devices.
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
+ * See COPYRIGHT file for additional information.
  */
 
 #include <sys/types.h>

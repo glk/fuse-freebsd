@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
+ * See COPYRIGHT file for additional information.
+ */
+
 #include <sys/types.h>
 #include <sys/module.h>
 #include <sys/systm.h>

@@ -1,5 +1,6 @@
 /*
- * Module load/unload stuff.
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
  */
 
 #include <sys/types.h>

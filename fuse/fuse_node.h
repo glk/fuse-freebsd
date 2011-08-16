@@ -1,6 +1,7 @@
 /*
- * Copyright (C) 2006-2008 Google. All Rights Reserved.
- * Amit Singh <singh@>
+ * Copyright (C) 2006-2008 Google. Amit Singh <singh@>
+ * Copyright (C) 2005 Csaba Henk.
+ * All Rights Reserved.
  */
 
 #ifndef _FUSE_NODE_H_

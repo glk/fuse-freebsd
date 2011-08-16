@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2006-2008 Google. All Rights Reserved.
- * Amit Singh <singh@>
+ * Copyright (C) 2006-2008 Google. Amit Singh <singh@>
+ * All Rights Reserved.
  */
 
 #ifndef _FUSE_PARAM_H_
