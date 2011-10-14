@@ -1,0 +1,8 @@
+*.o
+*.ko
+*.ko.*
+@
+machine
+x86
+export_syms
+vnode_if*.h
