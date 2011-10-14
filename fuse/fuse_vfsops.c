@@ -150,8 +150,11 @@ static int
 fuse_vfsop_mount(struct mount *mp)
 {
     int err     = 0;
-    int mntopts = 0;
-    int __mntopts = 0;
+#if __FreeBSD_version >= 900040
+    uint64_t mntopts = 0, __mntopts = 0;
+#else
+    int mntopts = 0, __mntopts = 0;
+#endif
     int max_read_set = 0;
     uint32_t max_read = ~0;
     int daemon_timeout;
@@ -217,7 +220,7 @@ fuse_vfsop_mount(struct mount *mp)
     subtype = vfs_getopts(opts, "subtype=", &err);
     err = 0;
 
-    DEBUG2G("mntopts 0x%x\n", mntopts);
+    DEBUG2G("mntopts 0x%jx\n", (uintmax_t)mntopts);
 
     FUSE_LOCK();
     data = fuse_get_devdata(fdev);
