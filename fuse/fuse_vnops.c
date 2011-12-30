@@ -1930,7 +1930,11 @@ fuse_vnop_getpages(struct vop_getpages_args *ap)
 			 * Read operation filled a partial page.
 			 */
 			m->valid = 0;
+#if __FreeBSD_version >= 1000002
+			vm_page_set_valid_range(m, 0, size - toff);
+#else
 			vm_page_set_valid(m, 0, size - toff);
+#endif
 			KASSERT(m->dirty == 0,
 			    ("fuse_getpages: page %p is dirty", m));
 		} else {
