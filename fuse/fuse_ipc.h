@@ -74,7 +74,6 @@ struct fuse_ticket {
 };
 
 #define FT_ANSW  0x01  // request of ticket has already been answered
-#define FT_INVAL 0x02  // ticket is invalidated
 #define FT_DIRTY 0x04  // ticket has been used
 
 static __inline__
@@ -108,14 +107,6 @@ fticket_opcode(struct fuse_ticket *ftick)
 {
     DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
     return (((struct fuse_in_header *)(ftick->tk_ms_fiov.base))->opcode);
-}
-
-static __inline__
-void
-fticket_invalidate(struct fuse_ticket *ftick)
-{
-    DEBUGX(FUSE_DEBUG_IPC, "-> ftick=%p\n", ftick);
-    ftick->tk_flag |= FT_INVAL;
 }
 
 int fticket_pull(struct fuse_ticket *ftick, struct uio *uio);

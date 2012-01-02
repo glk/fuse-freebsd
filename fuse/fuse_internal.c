@@ -556,7 +556,6 @@ fuse_internal_forget_send(struct mount *mp,
     ffi = fdi.indata;
     ffi->nlookup = nlookup;
 
-    fticket_invalidate(fdi.tick);
     fuse_insert_message(fdi.tick);
     fdisp_destroy(&fdi);
 }
